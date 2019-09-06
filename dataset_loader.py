@@ -64,3 +64,76 @@ class DatasetLoader:
             **self.__load_kwargs
         )
         return datasets, info
+
+    def dct1(self, batch_shape, axis=-1):
+        # TODO: TFのdctのaxisが機能するようになったらそちらに差し替える
+        transposed_shape = list(range(len(batch_shape) - 1))
+        if 0 <= axis and axis < len(transposed_shape):
+            transposed_shape[-1], transposed_shape[axis] =\
+                transposed_shape[axis], transposed_shape[-1]
+
+        tmp = """def map_func(data, label):
+            transposed = tf.transpose(data, %(transposed_shape)s)
+            dcted = tf.signal.dct(transposed, norm='ortho')
+            untransposed = tf.transpose(dcted, %(transposed_shape)s)
+            reshaped = tf.reshape(
+                dcted,
+                (%(batch_shape_0)s, %(batch_shape_axis)s, -1)
+            )
+            return reshaped, label""" % {
+                'transposed_shape': transposed_shape,
+                'batch_shape_0': batch_shape[0],
+                'batch_shape_axis': batch_shape[axis]
+            }
+        exec(tmp, globals())
+        return map_func
+
+    def encode_jpeg(self, quality=50, progressive=False, optimize_size=False, chroma_downsampling=True, skip_header=0):
+        tmp = """def map_func(image, label):
+            image = tf.image.encode_jpeg(
+                image,
+                quality=%(quality)d,
+                progressive=%(progressive)s,
+                optimize_size=%(optimize_size)s,
+                chroma_downsampling=%(chroma_downsampling)s
+            )
+            image = tf.io.decode_raw(image, tf.uint8)
+        """ % {
+            'quality': quality,
+            'progressive': progressive,
+            'optimize_size': optimize_size,
+            'chroma_downsampling': chroma_downsampling
+        }
+        if skip_header > 0:
+            tmp += """
+            marker_pos = tf.where(tf.equal(image, 255))
+            image = image[marker_pos[tf.where(tf.equal(tf.gather(image, marker_pos + 1), 218))[0][0]][0] + 8 + %d * 2:-3]
+        """ % (skip_header)
+        tmp += """
+            return tf.cast(image, tf.int16), label
+        """
+        exec(tmp, globals())
+        return map_func
+
+    def encode_png(self, compression=50, skip_header=0):
+        tmp = """def map_func(image, label):
+            image = tf.image.encode_jpeg(
+                image,
+                compression=%(compression)d
+            )
+            image = tf.io.decode_raw(image, tf.uint8)
+        """ % {'compression': compression}
+        if skip_header > 0:
+            # ヘッダー
+            # PNGファイルシグネチャ(8バイト) + IHDR(25バイト) = 33バイト
+            # フッター
+            # IEND(12バイト) = 12バイト
+            # 参考文献: PNG ファイルフォーマット(https://www.setsuki.com/hsp/ext/png.htm)
+            tmp += """
+            image = image[33:-12]
+        """ % (skip_header)
+        tmp += """
+            return tf.cast(image, tf.int16), label
+        """
+        exec(tmp, globals())
+        return map_func
