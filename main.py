@@ -7,8 +7,8 @@ import tensorflow_datasets as tfds
 import numpy as np
 from tensorflow import keras
 
-from dataset_loader import DatasetLoader
 from model_loader import ModelLoader
+import tfds_map
 
 
 def main():
@@ -18,14 +18,14 @@ def main():
     # tf.debugging.set_log_device_placement(True)
 
     DATASET_NAME = 'cifar10'
+    DATA_DIR = r'~/.datasets'
     BATCH_SIZE = 1000
 
     DO_DCT = False
 
-    dataset_loader = DatasetLoader(r"~/.datasets")
     model_loader = ModelLoader()
 
-    datasets, info = dataset_loader.load(DATASET_NAME, BATCH_SIZE)
+    datasets, info = tfds_map.load(DATASET_NAME, data_dir=DATA_DIR, batch_size=BATCH_SIZE)
     width, height, channels = info.features['image'].shape
     shape = info.features['image'].shape if not DO_DCT else (height, width * channels)
 
