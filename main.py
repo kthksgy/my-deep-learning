@@ -7,8 +7,8 @@ import tensorflow_datasets as tfds
 import numpy as np
 from tensorflow import keras
 
-from model_loader import ModelLoader
 import tfds_e
+from models.vgg16 import vgg16_keras
 
 
 def main():
@@ -17,42 +17,18 @@ def main():
     print('Keras Version: ', keras.__version__)
     # tf.debugging.set_log_device_placement(True)
 
-    DATASET_NAME = 'cifar10'
-    DATA_DIR = r'~/.datasets'
+    DATASET_NAME = 'stl10'
     BATCH_SIZE = 1000
 
-    DO_DCT = False
-
-    model_loader = ModelLoader()
-
-    datasets, info = tfds_e.load(DATASET_NAME, data_dir=DATA_DIR, batch_size=BATCH_SIZE)
-    width, height, channels = info.features['image'].shape
-    shape = info.features['image'].shape if not DO_DCT else (height, width * channels)
-
-    def scale(image, label):
-        image = tf.cast(image, tf.float32)
-        image /= 255.0
-        return image, label
-
-    def augment(image, label):
-        image = tf.image.random_crop(image, shape)
-
-    def dct(image, label):
-        transposed = tf.transpose(image, (0, 1, 3, 2))
-        dcted = tf.signal.dct(transposed, norm='ortho')
-        reshaped = tf.reshape(dcted, (BATCH_SIZE, height, -1))
-        return reshaped, label
+    datasets, info = tfds_e.load(DATASET_NAME)
 
     for key in datasets:
-        datasets[key] = datasets[key].map(scale, num_parallel_calls=16)
-        if(DO_DCT):
-            datasets[key] = datasets[key].map(dct, num_parallel_calls=16)
+        datasets[key] = datasets[key].map(tfds_e.map_quantize_pixels(), 16)
+        datasets[key] = datasets[key].shuffle(2000).batch(500)
 
-    model = model_loader.load(
-        shape=shape,
-        name="xception",
-        classes=info.features['label'].num_classes
-    )
+    model = vgg16_keras(
+        info.features['image'].shape,
+        info.features['label'].num_classes)
     model.summary()
 
     loss_object = keras.losses.SparseCategoricalCrossentropy()
