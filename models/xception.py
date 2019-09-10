@@ -3,7 +3,7 @@
 from tensorflow import keras
 
 
-def xception_keras(shape: tuple, classes: int) -> keras.Model:
+def xception_keras(input_shape: tuple, num_classes: int) -> keras.Model:
     """
     Keras Applicationsに用意されているXceptionを読み込む。
 
@@ -12,9 +12,9 @@ def xception_keras(shape: tuple, classes: int) -> keras.Model:
     https://arxiv.org/abs/1610.02357
 
     Args:
-        shape tuple:
+        input_shape tuple:
             入力の形状を指定する。
-        classes int:
+        num_classes int:
             分類するクラス数を指定する。
 
     Returns:
@@ -25,13 +25,13 @@ def xception_keras(shape: tuple, classes: int) -> keras.Model:
         include_top=True,
         weights=None,
         input_tensor=None,
-        input_shape=shape,
+        input_shape=input_shape,
         pooling=None,
-        classes=classes
+        classes=num_classes
     )
 
 
-def xception(shape: tuple, classes: int) -> keras.Model:
+def xception(input_shape: tuple, num_classes: int) -> keras.Model:
     """
     Xceptionを読み込む。
 
@@ -40,9 +40,9 @@ def xception(shape: tuple, classes: int) -> keras.Model:
     https://arxiv.org/abs/1610.02357
 
     Args:
-        shape tuple:
+        input_shape tuple:
             入力の形状を指定する。
-        classes int:
+        num_classes int:
             分類するクラス数を指定する。
 
     Returns:
@@ -50,7 +50,7 @@ def xception(shape: tuple, classes: int) -> keras.Model:
             Xceptionを返す。
     """
     # Input
-    inputs = keras.layers.Input(shape=shape)
+    inputs = keras.layers.Input(shape=input_shape)
     x = inputs
 
     # Entry Flow
@@ -143,7 +143,7 @@ def xception(shape: tuple, classes: int) -> keras.Model:
 
     x = keras.layers.GlobalAveragePooling2D()(x)
 
-    outputs = keras.layers.Dense(classes, activation='softmax')(x)
+    outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
 
     return keras.Model(inputs=inputs, outputs=outputs)
 

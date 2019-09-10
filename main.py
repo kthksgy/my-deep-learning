@@ -8,28 +8,36 @@ import numpy as np
 from tensorflow import keras
 
 import tfds_e
-from models.vgg16 import vgg16_keras
+from models.sample import sample
+from models.xception import xception_keras
 
 
 def main():
     print('Python Version: ', sys.version)
     print('TensorFlow Version: ', tf.__version__)
     print('Keras Version: ', keras.__version__)
+    # TensorFlow 2ではない場合はEager Executionを有効にする
+    if not tf.executing_eagerly():
+        tf.enable_eager_execution()
+    # 乱数種値を固定
+    tf.random.set_random_seed(0)
     # tf.debugging.set_log_device_placement(True)
 
     DATASET_NAME = 'stl10'
-    BATCH_SIZE = 1000
+    BATCH_SIZE = 500
 
     datasets, info = tfds_e.load(DATASET_NAME)
 
     for key in datasets:
         datasets[key] = datasets[key].map(tfds_e.map_quantize_pixels(), 16)
-        datasets[key] = datasets[key].shuffle(2000).batch(500)
+        datasets[key] = datasets[key].shuffle(BATCH_SIZE * 5)
+        datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
+        datasets[key] = datasets[key].prefetch(-1)
 
-    model = vgg16_keras(
+    model = xception_keras(
         info.features['image'].shape,
-        info.features['label'].num_classes)
-    model.summary()
+        info.features['label'].num_classes
+    )
 
     loss_object = keras.losses.SparseCategoricalCrossentropy()
     optimizer = keras.optimizers.Nadam()
@@ -41,6 +49,7 @@ def main():
     test_accuracy = keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
 
     model.compile(optimizer=optimizer, loss=loss_object)
+    model.summary()
 
     @tf.function
     def train_step(image, label):
