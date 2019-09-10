@@ -8,7 +8,7 @@ import numpy as np
 from tensorflow import keras
 
 from model_loader import ModelLoader
-import tfds_map
+import tfds_e
 
 
 def main():
@@ -25,7 +25,7 @@ def main():
 
     model_loader = ModelLoader()
 
-    datasets, info = tfds_map.load(DATASET_NAME, data_dir=DATA_DIR, batch_size=BATCH_SIZE)
+    datasets, info = tfds_e.load(DATASET_NAME, data_dir=DATA_DIR, batch_size=BATCH_SIZE)
     width, height, channels = info.features['image'].shape
     shape = info.features['image'].shape if not DO_DCT else (height, width * channels)
 

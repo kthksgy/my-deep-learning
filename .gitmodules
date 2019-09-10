@@ -1,3 +1,6 @@
 [submodule "tfds_map"]
 	path = tfds_map
 	url = git@github.com:sugaok/tfds-map.git
+[submodule "tfds_e"]
+	path = tfds_e
+	url = git@github.com:sugaok/tfds-extention.git
