@@ -3,7 +3,7 @@
 from tensorflow import keras
 
 
-def sample(input_shape: tuple, num_classes: int, units=1024) -> keras.Model:
+def model_sample(input_shape: tuple, num_classes: int, units=1024) -> keras.Model:
     """\
     サンプルモデルを読み込む。
 
