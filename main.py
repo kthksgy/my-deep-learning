@@ -189,14 +189,6 @@ def main():
     loss_object = keras.losses.SparseCategoricalCrossentropy()
     optimizer = keras.optimizers.Nadam()
 
-    train_loss = keras.metrics.Mean(name='train_loss')
-    train_accuracy = keras.metrics.SparseCategoricalAccuracy(
-        name='train_accuracy')
-
-    test_loss = keras.metrics.Mean(name='test_loss')
-    test_accuracy = keras.metrics.SparseCategoricalAccuracy(
-        name='test_accuracy')
-
     model.compile(
         optimizer=optimizer, loss=loss_object,
         metrics=[keras.metrics.sparse_categorical_accuracy])
@@ -216,7 +208,7 @@ def main():
             MODEL_NAME_WITH_INPUT_SHAPE + '.csv', append=True)
     )
     callbacks.append(
-        keras.callbacks.ReduceLROnPlateau('val_loss', factor=0.4, verbose=1)
+        keras.callbacks.ReduceLROnPlateau('val_loss', factor=0.9, verbose=1)
     )
     # epochs_and_lrs = {
     #     0: 0.01,
