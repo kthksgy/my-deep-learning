@@ -15,6 +15,29 @@ from tensorflow import keras
 import tfds_e
 
 
+def list_to_dict(even_list):
+    ret = {}
+    if even_list:
+        for i in range(0, len(even_list), 2):
+            try:
+                ret[even_list[i]] = int(even_list[i + 1])
+                continue
+            except ValueError:
+                pass
+            try:
+                ret[even_list[i]] = float(even_list[i + 1])
+                continue
+            except ValueError:
+                pass
+            try:
+                ret[even_list[i]] = bool(even_list[i + 1])
+                continue
+            except ValueError:
+                pass
+            ret[even_list[i]] = even_list[i + 1]
+    return ret
+
+
 def get_model_names():
     model_names = []
     for filename in glob.glob(
@@ -46,12 +69,26 @@ def main():
         '-b', '--batch', type=int,
         help='バッチサイズを指定します')
     parser.add_argument(
+        '-il', '--inputlength', type=int,
+        help='系列の最大長さを指定します')
+    parser.add_argument(
+        '-e', '--epochs', type=int, default=500,
+        help='総実行エポック数を指定します')
+    parser.add_argument(
         '-lm', '--listmodels',
         help='モデル名の一覧を表示します。',
         action="store_true")
     parser.add_argument(
-        '-mk', '--modelkwargs', default='{}',
-        help='モデルに渡す追加パラメータを指定します。')
+        '-mk', '--modelkwargs', nargs='+',
+        help='モデルに渡す追加パラメータを指定します')
+    parser.add_argument(
+        '-ck', '--compressionkwargs', nargs='+',
+        help='圧縮時のパラメータを指定します'
+    )
+    parser.add_argument(
+        '-checkmaxlength',
+        help='指定したデータセットの最大長さを測定します',
+        action="store_true")
     args = parser.parse_args()
 
     if args.listmodels:
@@ -73,16 +110,33 @@ def main():
     random.seed(0)                      # 標準のランダム
     # tf.debugging.set_log_device_placement(True)
 
+    # 定数定義
     DATASET_NAME = args.dataset
     BATCH_SIZE = args.batch
     MODEL_NAME = args.model
+    MODEL_KWARGS = list_to_dict(args.modelkwargs)
     _tmp = MODEL_NAME.find('_')
     MODEL_FILENAME = MODEL_NAME if _tmp == -1 else MODEL_NAME[:_tmp]
-
-    INPUT_LENGTH = 100
+    EPOCHS = args.epochs
+    INPUT_LENGTH = args.inputlength
+    COMPRESSION_KWARGS = list_to_dict(args.compressionkwargs)
 
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
+
+    if args.checkmaxlength:
+        print('系列の最大長さの計測を開始します。暫くお待ちください。')
+        dataset_list = list(datasets.values())
+        dataset = dataset_list.pop(0)
+        for to_concat in dataset_list:
+            dataset.concatenate(to_concat)
+        # 前処理
+        dataset = dataset.map(tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), 16)
+        max_length = 0
+        for image, label in dataset:
+            max_length = max(max_length, len(image))
+        print('最大長さ:', max_length)
+        return
 
     # データセットへの前処理
     for key in datasets:
@@ -116,31 +170,18 @@ def main():
     # モデルの読み込み
     if os.path.exists(SAVED_MODEL_WEIGHTS_FILENAME):
         # 保存されたデータが有ればコンパイル無しで読み込む
-        print('LAODODODODOOMOD')
         model = keras.models.load_model(
             SAVED_MODEL_WEIGHTS_FILENAME,
             compile=False)
     else:
-        print('LDODOD')
         # 新たなモデルを読み込む
-
-#         script = """\
-# from models.%(filename)s import model_%(modelname)s as load_model
-# model = model_%(modelname)s(%(input_shape)s, %(num_classes)d, **%(kwargs)s)\
-#     """ % {
-#             'filename': MODEL_FILENAME,
-#             'modelname': MODEL_NAME,
-#             'input_shape': INPUT_SHAPE,
-#             'num_classes': NUM_CLASSES,
-#             'kwargs': args.modelkwargs
-#         }
         script = 'from models.%(filename)s\
             import model_%(modelname)s as load_model' % {
             'filename': MODEL_FILENAME,
             'modelname': MODEL_NAME
         }
         exec(script, globals())
-        model = load_model(INPUT_SHAPE, NUM_CLASSES)
+        model = load_model(INPUT_SHAPE, NUM_CLASSES, **MODEL_KWARGS)
     if not model:
         print('モデルの読み込みに失敗しました。')
         return
@@ -156,7 +197,9 @@ def main():
     test_accuracy = keras.metrics.SparseCategoricalAccuracy(
         name='test_accuracy')
 
-    model.compile(optimizer=optimizer, loss=loss_object)
+    model.compile(
+        optimizer=optimizer, loss=loss_object,
+        metrics=[keras.metrics.sparse_categorical_accuracy])
     model.summary()
     try:
         keras.utils.plot_model(
@@ -164,66 +207,46 @@ def main():
     except ImportError as e:
         print('graphvizとpydotが見つからないため、モデルの図の出力は出来ません。')
 
-    @tf.function
-    def train_step(image, label):
-        with tf.GradientTape() as tape:
-            predictions = model(image)
-            loss = loss_object(label, predictions)
-        gradients = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    callbacks = []
+    callbacks.append(
+        keras.callbacks.TerminateOnNaN()
+    )
+    callbacks.append(
+        keras.callbacks.CSVLogger(
+            MODEL_NAME_WITH_INPUT_SHAPE + '.csv', append=True)
+    )
+    callbacks.append(
+        keras.callbacks.ReduceLROnPlateau('val_loss', factor=0.4, verbose=1)
+    )
+    # epochs_and_lrs = {
+    #     0: 0.01,
+    #     EPOCHS * 0.01: 0.005,
+    #     EPOCHS * 0.03: 0.002,
+    #     EPOCHS * 0.1: 0.001,
+    #     EPOCHS * 0.9: 0.0001
+    # }
+    # lr_now = 0.001
 
-        train_loss(loss)
-        train_accuracy(label, predictions)
+    # def lr_schedule(epoch):
+    #     global lr_now
+    #     if epoch in epochs_and_lrs:
+    #         lr_now = epochs_and_lrs[epoch]
+    #         return epochs_and_lrs[epoch]
+    #     else:
+    #         return lr_now
 
-    @tf.function
-    def test_step(image, label):
-        predictions = model(image)
-        loss = loss_object(label, predictions)
+    # callbacks.append(
+    #     keras.callbacks.LearningRateScheduler(lr_schedule)
+    # )
 
-        test_loss(loss)
-        test_accuracy(label, predictions)
-
-    file_result = open('result.csv', mode='a')
-    file_result.write('epochs,train_loss,train_acc,test_loss,test_acc\n')
-
-    EPOCHS = 1000
-
-    for epoch in range(EPOCHS):
-        keras.backend.set_learning_phase(1)
-        for image, label in datasets['train']:
-            train_step(image, label)
-
-        if('validation' in datasets):
-            keras.backend.set_learning_phase(0)
-            for test_image, test_label in datasets['validation']:
-                test_step(test_image, test_label)
-
-        if('test' in datasets):
-            keras.backend.set_learning_phase(0)
-            for test_image, test_label in datasets['test']:
-                test_step(test_image, test_label)
-
-        template = 'Epoch {:0%d}, Loss: {:.5f}, Accuracy: {:.4f}, Test Loss: {:.5f}, Test Accuracy: {:.4f}' % len(str(EPOCHS))  # noqa: E501
-        print(
-            template.format(
-                epoch + 1,
-                train_loss.result(),
-                train_accuracy.result(),
-                test_loss.result(),
-                test_accuracy.result()
-            )
-        )
-        result_line = '{:0%d},{:.5f},{:.4f},{:.5f},{:.4f}\n' % len(str(EPOCHS))
-        file_result.write(
-            result_line.format(
-                epoch + 1,
-                train_loss.result(),
-                train_accuracy.result(),
-                test_loss.result(),
-                test_accuracy.result()
-            )
-        )
-    file_result.close()
+    model.fit(
+        datasets['train'],
+        epochs=EPOCHS,
+        verbose=2,
+        callbacks=callbacks,
+        validation_data=datasets[
+            'validation' if 'validation' in datasets else
+            'test'])
 
     # モデルの保存
     keras.models.save_model(
