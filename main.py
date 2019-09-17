@@ -142,6 +142,8 @@ def main():
     for key in datasets:
         # 前処理
         datasets[key] = datasets[key].map(
+            tfds_e.map_random_size_crop(0, 4, 0, 4), 16)
+        datasets[key] = datasets[key].map(
             tfds_e.map_encode_jpeg(quality=0, skip_header=True), 16)
         datasets[key] = datasets[key].map(
             lambda image, label: (tf.cast(image, tf.int16), label), 16)
