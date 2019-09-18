@@ -35,7 +35,7 @@ def model_transformer_encoder(
 
     for i in range(num_conv_layers):
         query = keras.layers.Conv1D(
-            hidden_dim, conv_kernel_size, name='conv_%d' % i)(query)
+            hidden_dim, conv_kernel_size, padding='same', name='conv_%d' % i)(query)
 
     query = PositionalEncoding(name='positional_encoding')(query)
 
