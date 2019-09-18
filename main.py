@@ -31,12 +31,12 @@ def list_to_dict(even_list):
                 continue
             except ValueError:
                 pass
-            try:
-                ret[even_list[i]] = bool(even_list[i + 1])
-                continue
-            except ValueError:
-                pass
-            ret[even_list[i]] = even_list[i + 1]
+            if even_list[i + 1].lower() == 'true':
+                ret[even_list[i]] = True
+            elif even_list[i + 1].lower() == 'false':
+                ret[even_list[i]] = False
+            else:
+                ret[even_list[i]] = even_list[i + 1]
     return ret
 
 
@@ -171,10 +171,12 @@ def main():
         m=args.model,
         dt=EXEC_DT
     )
-    RESULT_FILENAME = RESULT_NAME_BASE + '.csv'
-    INFO_FILENAME = RESULT_NAME_BASE + '.tsv'
-    SAVE_FILENAME = RESULT_NAME_BASE + '.h5'
-    PLOT_FILENAME = RESULT_NAME_BASE + '.png'
+    LOG_DIR = 'log_' + RESULT_NAME_BASE
+    os.makedirs(LOG_DIR)
+    RESULT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.csv')
+    INFO_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.tsv')
+    SAVE_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.h5')
+    PLOT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.png')
 
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
@@ -187,7 +189,8 @@ def main():
         for to_concat in dataset_list:
             dataset.concatenate(to_concat)
         # 前処理
-        dataset = dataset.map(tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), NUM_CPUS)
+        dataset = dataset.map(
+            tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), NUM_CPUS)
         max_length = 0
         for image, label in dataset:
             max_length = max(max_length, len(image))
@@ -200,7 +203,7 @@ def main():
         # データオーギュメンテーション
         if AUGMENT and key == 'train':
             datasets[key] = datasets[key].map(
-                tfds_e.map_random_size_crop(0, 4, 0, 4), NUM_CPUS)
+                tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
 
         # 圧縮して時系列データへ
         datasets[key] = datasets[key].map(
@@ -230,10 +233,10 @@ def main():
     NUM_CLASSES = info.features['label'].num_classes
 
     # モデルの読み込み
-    if os.path.exists(SAVE_FILENAME):
+    if os.path.exists(SAVE_PATH):
         # 保存されたデータが有ればコンパイル無しで読み込む
         model = keras.models.load_model(
-            SAVE_FILENAME,
+            SAVE_PATH,
             compile=False)
     else:
         # 新たなモデルを読み込む
@@ -248,16 +251,27 @@ def main():
         print('モデルの読み込みに失敗しました。')
         return
 
-    loss_object = keras.losses.SparseCategoricalCrossentropy()
-    optimizer = keras.optimizers.Nadam()
+    # OPTIMIZER = keras.optimizers.SGD(
+    #     lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+    OPTIMIZER = keras.optimizers.Adam()
+    ENVLOG.append('\t'.join(map(str, [
+        '最適化アルゴリズム', dict_to_oneline(OPTIMIZER.get_config())
+    ])))
+
+    LOSS = 'sparse_categorical_crossentropy'
+    ENVLOG.append('\t'.join(map(str, [
+        '損失関数', LOSS
+    ])))
 
     model.compile(
-        optimizer=optimizer, loss=loss_object,
+        optimizer=OPTIMIZER,
+        loss=LOSS,
         metrics=[keras.metrics.sparse_categorical_accuracy])
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
+    model.summary()
     try:
         keras.utils.plot_model(
-            model, PLOT_FILENAME, True, True, 'TB')
+            model, PLOT_PATH, True, True, 'TB')
     except ImportError as e:
         print('graphvizとpydotが見つからないため、モデルの図の出力は出来ません。')
 
@@ -268,8 +282,14 @@ def main():
     )
     callbacks.append(
         keras.callbacks.CSVLogger(
-            RESULT_FILENAME, append=True)
+            RESULT_PATH, append=True)
     )
+    # REVIEW: val_lossの監視だと期待したよりも早く停止してしまう
+    # callbacks.append(
+    #     keras.callbacks.EarlyStopping(
+    #         'val_loss', 1e-4, 5, 1,
+    #         restore_best_weights=True)
+    # )
     callbacks.append(
         keras.callbacks.ReduceLROnPlateau('val_loss', factor=0.9, verbose=1)
     )
@@ -278,24 +298,28 @@ def main():
     ])))
 
     # 環境情報をファイルに書き込み
-    with open(INFO_FILENAME, 'w', encoding='utf-8') as f:
+    with open(INFO_PATH, 'w', encoding='utf-8') as f:
         f.write('\n'.join(ENVLOG))
 
-    model.fit(
-        datasets['train'],
-        epochs=EPOCHS,
-        verbose=2,
-        callbacks=callbacks,
-        validation_data=datasets[
-            'validation' if 'validation' in datasets else
-            'test'])
-
-    # モデルの保存
-    keras.models.save_model(
-        model,
-        SAVE_FILENAME,
-        include_optimizer=False,
-        save_format='h5')
+    try:
+        model.fit(
+            datasets['train'],
+            epochs=EPOCHS,
+            verbose=2,
+            callbacks=callbacks,
+            validation_data=datasets[
+                'validation' if 'validation' in datasets else
+                'test'])
+    except KeyboardInterrupt as e:
+        pass
+    finally:
+        # モデルの保存
+        keras.models.save_model(
+            model,
+            SAVE_PATH,
+            include_optimizer=False,
+            save_format='h5')
+        print('処理が完了しました。')
 
 
 if __name__ == '__main__':

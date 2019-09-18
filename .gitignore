@@ -3,3 +3,6 @@
 .git
 __pycache__
 test.py
+
+# 実行ログディレクトリ
+log_*/

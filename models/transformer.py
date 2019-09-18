@@ -6,7 +6,7 @@ from .layers import LayerNormalization, PositionalEncoding
 
 
 def model_transformer_encoder(
-    input_shape: tuple,
+    batch_shape: tuple,
     num_classes: int,
     num_vocabularies=258,
     embedding_dim=64,
@@ -15,14 +15,16 @@ def model_transformer_encoder(
     dropout_rate=0.1,
     dtype='int16',
     hopping=4,
-    pad_id=0
+    pad_id=0,
+    num_conv_layers=0,
+    conv_kernel_size=3
 ) -> keras.Model:
     # 必要な数値を変数に保持
-    BATCH_SIZE = input_shape[0] if len(input_shape) == 2 else None
-    INPUT_LENGTH = input_shape[-1]
+    BATCH_SIZE = batch_shape[0]
+    INPUT_LENGTH = batch_shape[-1]
     # Input
     inputs = keras.layers.Input(
-        batch_shape=input_shape,
+        batch_shape=batch_shape,
         dtype=dtype,
         name='input')
 
@@ -30,6 +32,11 @@ def model_transformer_encoder(
         num_vocabularies, embedding_dim,
         input_length=INPUT_LENGTH,
         name='embedding')(inputs)
+
+    for i in range(num_conv_layers):
+        query = keras.layers.Conv1D(
+            hidden_dim, conv_kernel_size, name='conv_%d' % i)(query)
+
     query = PositionalEncoding(name='positional_encoding')(query)
 
     # shape broadcasting で [batch_size, head_num, (m|q)_length, m_length] になる
