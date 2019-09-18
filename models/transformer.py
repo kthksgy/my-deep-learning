@@ -5,16 +5,16 @@ from tensorflow import keras
 from .layers import LayerNormalization, PositionalEncoding
 
 
-def model_attention_self_multihead(
+def model_transformer_encoder(
     input_shape: tuple,
     num_classes: int,
     num_vocabularies=258,
-    embedding_dim=32,
-    hidden_dim=32,
-    num_heads=4,
-    dropout_rate=0.05,
+    embedding_dim=64,
+    hidden_dim=64,
+    num_heads=2,
+    dropout_rate=0.1,
     dtype='int16',
-    hopping=3,
+    hopping=4,
     pad_id=0
 ) -> keras.Model:
     # 必要な数値を変数に保持
@@ -123,4 +123,6 @@ def model_attention_self_multihead(
     outputs = keras.layers.Dense(
         num_classes, activation='softmax',
         name='final_output_dense')(cls_vector)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    return keras.Model(
+        inputs=inputs, outputs=outputs,
+        name='transformer_encoder')

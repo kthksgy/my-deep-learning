@@ -4,7 +4,9 @@ from __future__ import (
     print_function, unicode_literals)
 
 import argparse
+import datetime
 import glob
+import multiprocessing
 import numpy as np
 import os
 import random
@@ -36,6 +38,11 @@ def list_to_dict(even_list):
                 pass
             ret[even_list[i]] = even_list[i + 1]
     return ret
+
+
+def dict_to_oneline(to_oneline: dict) -> str:
+    return ', '.join([
+        '%s=%s' % (key, value) for key, value in to_oneline.items()])
 
 
 def get_model_names():
@@ -79,11 +86,16 @@ def main():
         help='モデル名の一覧を表示します。',
         action="store_true")
     parser.add_argument(
-        '-mk', '--modelkwargs', nargs='+',
+        '-mkw', '--modelkwargs', nargs='+',
         help='モデルに渡す追加パラメータを指定します')
     parser.add_argument(
-        '-ck', '--compressionkwargs', nargs='+',
+        '-ckw', '--compressionkwargs', nargs='+',
         help='圧縮時のパラメータを指定します'
+    )
+    parser.add_argument(
+        '-augment',
+        help='訓練データに対して予め用意されたデータオーギュメントを実施します。',
+        action='store_true'
     )
     parser.add_argument(
         '-checkmaxlength',
@@ -95,35 +107,79 @@ def main():
         print('モデル名: ', get_model_names())
         return
 
+    NUM_CPUS = multiprocessing.cpu_count()
+    EXEC_DT = datetime.datetime.now()
+
     # バージョン表示
     print('Python Version: ', sys.version)
     print('TensorFlow Version: ', tf.__version__)
     print('Keras Version: ', keras.__version__)
+    ENVLOG = list()
+    ENVLOG.append('\t'.join(map(str, [
+        'Python', sys.version,
+        'TensorFlow', tf.__version__,
+        'Keras', keras.__version__
+    ])))
 
     # TensorFlow 2ではない場合はEager Executionを有効にする
     if not tf.executing_eagerly():
         tf.enable_eager_execution()
     # 乱数種値を固定
-    tf.random.set_random_seed(0)        # TensorFlow
-    os.environ['PYTHONHASHSEED'] = '0'  # PYTHONのハッシュ関数
-    np.random.seed(0)                   # numpy
-    random.seed(0)                      # 標準のランダム
+    RANDOM_SEED = 0
+    tf.random.set_random_seed(RANDOM_SEED)        # TensorFlow
+    os.environ['PYTHONHASHSEED'] = str(RANDOM_SEED)  # Pythonのハッシュ関数
+    np.random.seed(RANDOM_SEED)                   # numpy
+    random.seed(RANDOM_SEED)                      # 標準のランダム
+    ENVLOG.append('Random Seed\t%d' % RANDOM_SEED)
     # tf.debugging.set_log_device_placement(True)
 
     # 定数定義
+    # データセット関係の定数
     DATASET_NAME = args.dataset
     BATCH_SIZE = args.batch
+    INPUT_LENGTH = args.inputlength
+    ENVLOG.append('\t'.join(map(str, [
+        'データセット', DATASET_NAME,
+        'バッチサイズ', BATCH_SIZE,
+        '最大入力長', INPUT_LENGTH
+    ])))
+    AUGMENT = args.augment
+
+    # 圧縮関連の定数
+    COMPRESSION_KWARGS = list_to_dict(args.compressionkwargs)
+    ENVLOG.append('\t'.join(map(str, [
+        '圧縮方式', 'jpeg',
+        '圧縮パラメータ', dict_to_oneline(COMPRESSION_KWARGS)
+    ])))
+
+    # モデル関係の定数
     MODEL_NAME = args.model
     MODEL_KWARGS = list_to_dict(args.modelkwargs)
     _tmp = MODEL_NAME.find('_')
     MODEL_FILENAME = MODEL_NAME if _tmp == -1 else MODEL_NAME[:_tmp]
+    ENVLOG.append('\t'.join(map(str, [
+        'モデル', MODEL_NAME,
+        'モデルパラメータ', dict_to_oneline(MODEL_KWARGS),
+    ])))
+
+    # 訓練関連の定数
     EPOCHS = args.epochs
-    INPUT_LENGTH = args.inputlength
-    COMPRESSION_KWARGS = list_to_dict(args.compressionkwargs)
+
+    # 結果出力用のファイルネーム
+    RESULT_NAME_BASE = '{d}_{m}_{dt:%Y%m%d%H%M%S}'.format(
+        d=args.dataset,
+        m=args.model,
+        dt=EXEC_DT
+    )
+    RESULT_FILENAME = RESULT_NAME_BASE + '.csv'
+    INFO_FILENAME = RESULT_NAME_BASE + '.tsv'
+    SAVE_FILENAME = RESULT_NAME_BASE + '.h5'
+    PLOT_FILENAME = RESULT_NAME_BASE + '.png'
 
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
 
+    # 系列の長さチェックをやる場合はここで終了
     if args.checkmaxlength:
         print('系列の最大長さの計測を開始します。暫くお待ちください。')
         dataset_list = list(datasets.values())
@@ -131,7 +187,7 @@ def main():
         for to_concat in dataset_list:
             dataset.concatenate(to_concat)
         # 前処理
-        dataset = dataset.map(tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), 16)
+        dataset = dataset.map(tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), NUM_CPUS)
         max_length = 0
         for image, label in dataset:
             max_length = max(max_length, len(image))
@@ -140,15 +196,23 @@ def main():
 
     # データセットへの前処理
     for key in datasets:
-        # 前処理
+        ENVLOG.append('データ前処理[%s]' % key)
+        # データオーギュメンテーション
+        if AUGMENT and key == 'train':
+            datasets[key] = datasets[key].map(
+                tfds_e.map_random_size_crop(0, 4, 0, 4), NUM_CPUS)
+
+        # 圧縮して時系列データへ
         datasets[key] = datasets[key].map(
-            tfds_e.map_random_size_crop(0, 4, 0, 4), 16)
+            tfds_e.map_encode_jpeg(
+                quality=0, skip_header=True, log=ENVLOG), NUM_CPUS)
         datasets[key] = datasets[key].map(
-            tfds_e.map_encode_jpeg(quality=0, skip_header=True), 16)
+            lambda image, label: (tf.cast(image, tf.int16), label), NUM_CPUS)
         datasets[key] = datasets[key].map(
-            lambda image, label: (tf.cast(image, tf.int16), label), 16)
-        datasets[key] = datasets[key].map(tfds_e.map_add_cls(cls_id=256), 16)
-        datasets[key] = datasets[key].map(tfds_e.map_shift_id(amount=1), 16)
+            tfds_e.map_add_cls(cls_id=256, log=ENVLOG), NUM_CPUS)
+        datasets[key] = datasets[key].map(
+            tfds_e.map_shift_id(amount=1, log=ENVLOG), NUM_CPUS)
+
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
         if key == 'train':
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 5)
@@ -165,15 +229,11 @@ def main():
     INPUT_SHAPE = (BATCH_SIZE, INPUT_LENGTH)
     NUM_CLASSES = info.features['label'].num_classes
 
-    MODEL_NAME_WITH_INPUT_SHAPE = 'model_%s_%s' % (
-        MODEL_NAME, '_'.join(map(str, INPUT_SHAPE)))
-    SAVED_MODEL_WEIGHTS_FILENAME = MODEL_NAME_WITH_INPUT_SHAPE + '.h5'
-
     # モデルの読み込み
-    if os.path.exists(SAVED_MODEL_WEIGHTS_FILENAME):
+    if os.path.exists(SAVE_FILENAME):
         # 保存されたデータが有ればコンパイル無しで読み込む
         model = keras.models.load_model(
-            SAVED_MODEL_WEIGHTS_FILENAME,
+            SAVE_FILENAME,
             compile=False)
     else:
         # 新たなモデルを読み込む
@@ -194,44 +254,32 @@ def main():
     model.compile(
         optimizer=optimizer, loss=loss_object,
         metrics=[keras.metrics.sparse_categorical_accuracy])
-    model.summary()
+    model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     try:
         keras.utils.plot_model(
-            model, MODEL_NAME_WITH_INPUT_SHAPE + '.png', True, True, 'TB')
+            model, PLOT_FILENAME, True, True, 'TB')
     except ImportError as e:
         print('graphvizとpydotが見つからないため、モデルの図の出力は出来ません。')
 
+    ENVLOG.append('訓練時のコールバック')
     callbacks = []
     callbacks.append(
         keras.callbacks.TerminateOnNaN()
     )
     callbacks.append(
         keras.callbacks.CSVLogger(
-            MODEL_NAME_WITH_INPUT_SHAPE + '.csv', append=True)
+            RESULT_FILENAME, append=True)
     )
     callbacks.append(
         keras.callbacks.ReduceLROnPlateau('val_loss', factor=0.9, verbose=1)
     )
-    # epochs_and_lrs = {
-    #     0: 0.01,
-    #     EPOCHS * 0.01: 0.005,
-    #     EPOCHS * 0.03: 0.002,
-    #     EPOCHS * 0.1: 0.001,
-    #     EPOCHS * 0.9: 0.0001
-    # }
-    # lr_now = 0.001
+    ENVLOG.append('\t'.join(map(str, [
+        'ReduceLROnPlateau', 'val_loss, factor=0.9'
+    ])))
 
-    # def lr_schedule(epoch):
-    #     global lr_now
-    #     if epoch in epochs_and_lrs:
-    #         lr_now = epochs_and_lrs[epoch]
-    #         return epochs_and_lrs[epoch]
-    #     else:
-    #         return lr_now
-
-    # callbacks.append(
-    #     keras.callbacks.LearningRateScheduler(lr_schedule)
-    # )
+    # 環境情報をファイルに書き込み
+    with open(INFO_FILENAME, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(ENVLOG))
 
     model.fit(
         datasets['train'],
@@ -245,7 +293,7 @@ def main():
     # モデルの保存
     keras.models.save_model(
         model,
-        SAVED_MODEL_WEIGHTS_FILENAME,
+        SAVE_FILENAME,
         include_optimizer=False,
         save_format='h5')
 
