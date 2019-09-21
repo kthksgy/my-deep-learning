@@ -109,7 +109,6 @@ def main():
 
     NUM_CPUS = multiprocessing.cpu_count()
     EXEC_DT = datetime.datetime.now()
-
     # バージョン表示
     print('Python Version: ', sys.version)
     print('TensorFlow Version: ', tf.__version__)
@@ -126,7 +125,10 @@ def main():
         tf.enable_eager_execution()
     # 乱数種値を固定
     RANDOM_SEED = 0
-    tf.random.set_random_seed(RANDOM_SEED)        # TensorFlow
+    if tf.__version__.startswith('1'):
+        tf.random.set_random_seed(RANDOM_SEED)        # TensorFlow
+    else:
+        tf.random.set_seed(RANDOM_SEED)
     os.environ['PYTHONHASHSEED'] = str(RANDOM_SEED)  # Pythonのハッシュ関数
     np.random.seed(RANDOM_SEED)                   # numpy
     random.seed(RANDOM_SEED)                      # 標準のランダム
@@ -235,9 +237,11 @@ def main():
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
         # 保存されたデータが有ればコンパイル無しで読み込む
+        print('セーブファイルが存在するため読み込みを行います。')
         model = keras.models.load_model(
             SAVE_PATH,
             compile=False)
+        print('読み込みが完了しました。')
     else:
         # 新たなモデルを読み込む
         script = 'from models.%(filename)s\
@@ -266,13 +270,16 @@ def main():
     model.compile(
         optimizer=OPTIMIZER,
         loss=LOSS,
-        metrics=[keras.metrics.sparse_categorical_accuracy])
+        metrics=[keras.metrics.sparse_categorical_accuracy],
+        experimental_run_tf_function=False)
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     model.summary()
     try:
         keras.utils.plot_model(
             model, PLOT_PATH, True, True, 'TB')
     except ImportError as e:
+        print('graphvizとpydotが見つからないため、モデルの図の出力は出来ません。')
+    except AssertionError as e:
         print('graphvizとpydotが見つからないため、モデルの図の出力は出来ません。')
 
     ENVLOG.append('訓練時のコールバック')
@@ -314,11 +321,11 @@ def main():
         pass
     finally:
         # モデルの保存
-        keras.models.save_model(
-            model,
-            SAVE_PATH,
-            include_optimizer=False,
-            save_format='h5')
+        # keras.models.save_model(
+        #     model,
+        #     SAVE_PATH,
+        #     include_optimizer=False,
+        #     save_format='h5')
         print('処理が完了しました。')
 
 

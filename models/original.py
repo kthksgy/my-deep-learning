@@ -40,27 +40,24 @@ def model_original(
     if cell.lower() == 'gru':
         cells = [
             keras.layers.GRUCell(
-                units, dropout=dropout_rate,
-                return_sequences=True, reset_after=True)
-            for _ in range(num_rnn_layers - 1)
+                units, dropout=dropout_rate, reset_after=True)
+            for i in range(num_rnn_layers - 1)
         ]
         cells.append(
             keras.layers.GRUCell(
                 num_classes, dropout=dropout_rate, reset_after=True)
         )
-        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells))(x)
+        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells), name='gru_%d_stacked' % num_rnn_layers)(x)
     # KerasのLSTM
     elif cell.lower() == 'lstm':
         cells = [
-            keras.layers.LSTMCell(
-                units, dropout=dropout_rate,
-                return_sequences=True, )
+            keras.layers.LSTMCell(units, dropout=dropout_rate)
             for _ in range(num_rnn_layers - 1)
         ]
         cells.append(
             keras.layers.LSTMCell(num_classes, dropout=dropout_rate)
         )
-        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells))(x)
+        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells), name='lstm_%d_stacked' % num_rnn_layers)(x)
     # CuDNN版のGRU
     elif cell.lower() == 'cudnngru':
         for _ in range(num_rnn_layers - 1):
