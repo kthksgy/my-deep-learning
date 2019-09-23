@@ -14,8 +14,8 @@ def model_original(
     """\
     num_rnn_layers層unitsユニットのRNNからなるモデルを読み込む。
     Args:
-        input_shape tuple:
-            入力の形状。
+        batch_shape tuple:
+            入力バッチの形状。
         num_classes int:
             分類するクラス数。
         units int:
@@ -80,5 +80,5 @@ def model_original(
         x = keras.layers.RNN(
             keras.layers.StackedRNNCells(cells),
             return_sequences=False, name='rnn_%d_stacked' % num_rnn_layers)(x)
-    outputs = keras.layers.Dense(num_classes)(x)
+    outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
     return keras.Model(inputs=inputs, outputs=outputs, name="original")

@@ -73,23 +73,23 @@ def main():
         '-d', '--dataset',
         help='データセット名を指定します')
     parser.add_argument(
-        '-b', '--batch', type=int,
+        '-bs', '--batch-size', type=int,
         help='バッチサイズを指定します')
     parser.add_argument(
-        '-il', '--inputlength', type=int,
+        '-il', '--input-length', type=int,
         help='系列の最大長さを指定します')
     parser.add_argument(
         '-e', '--epochs', type=int, default=500,
         help='総実行エポック数を指定します')
     parser.add_argument(
-        '-lm', '--listmodels',
+        '-lm', '--list-models',
         help='モデル名の一覧を表示します。',
         action="store_true")
     parser.add_argument(
-        '-mkw', '--modelkwargs', nargs='+',
+        '-mkw', '--model-kwargs', nargs='+',
         help='モデルに渡す追加パラメータを指定します')
     parser.add_argument(
-        '-ckw', '--compressionkwargs', nargs='+',
+        '-ckw', '--compression-kwargs', nargs='+',
         help='圧縮時のパラメータを指定します'
     )
     parser.add_argument(
@@ -98,12 +98,12 @@ def main():
         action='store_true'
     )
     parser.add_argument(
-        '-checkmaxlength',
+        '-check-length',
         help='指定したデータセットの最大長さを測定します',
         action="store_true")
     args = parser.parse_args()
 
-    if args.listmodels:
+    if args.list_models:
         print('モデル名: ', get_model_names())
         return
 
@@ -115,7 +115,7 @@ def main():
     print('Keras Version: ', keras.__version__)
     ENVLOG = list()
     ENVLOG.append('\t'.join(map(str, [
-        'Python', sys.version,
+        'Python', sys.version.strip('\n'),
         'TensorFlow', tf.__version__,
         'Keras', keras.__version__
     ])))
@@ -138,17 +138,18 @@ def main():
     # 定数定義
     # データセット関係の定数
     DATASET_NAME = args.dataset
-    BATCH_SIZE = args.batch
-    INPUT_LENGTH = args.inputlength
+    BATCH_SIZE = args.batch_size
+    INPUT_LENGTH = args.input_length
     ENVLOG.append('\t'.join(map(str, [
         'データセット', DATASET_NAME,
         'バッチサイズ', BATCH_SIZE,
         '最大入力長', INPUT_LENGTH
     ])))
     AUGMENT = args.augment
+    DO_CHECK_LENGTH = args.check_length
 
     # 圧縮関連の定数
-    COMPRESSION_KWARGS = list_to_dict(args.compressionkwargs)
+    COMPRESSION_KWARGS = list_to_dict(args.compression_kwargs)
     ENVLOG.append('\t'.join(map(str, [
         '圧縮方式', 'jpeg',
         '圧縮パラメータ', dict_to_oneline(COMPRESSION_KWARGS)
@@ -156,7 +157,7 @@ def main():
 
     # モデル関係の定数
     MODEL_NAME = args.model
-    MODEL_KWARGS = list_to_dict(args.modelkwargs)
+    MODEL_KWARGS = list_to_dict(args.model_kwargs)
     _tmp = MODEL_NAME.find('_')
     MODEL_FILENAME = MODEL_NAME if _tmp == -1 else MODEL_NAME[:_tmp]
     ENVLOG.append('\t'.join(map(str, [
@@ -166,25 +167,11 @@ def main():
 
     # 訓練関連の定数
     EPOCHS = args.epochs
-
-    # 結果出力用のファイルネーム
-    RESULT_NAME_BASE = '{d}_{m}_{dt:%Y%m%d%H%M%S}'.format(
-        d=args.dataset,
-        m=args.model,
-        dt=EXEC_DT
-    )
-    LOG_DIR = 'log_' + RESULT_NAME_BASE
-    os.makedirs(LOG_DIR)
-    RESULT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.csv')
-    INFO_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.tsv')
-    SAVE_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.h5')
-    PLOT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.png')
-
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
 
     # 系列の長さチェックをやる場合はここで終了
-    if args.checkmaxlength:
+    if args.check_length:
         print('系列の最大長さの計測を開始します。暫くお待ちください。')
         dataset_list = list(datasets.values())
         dataset = dataset_list.pop(0)
@@ -198,6 +185,19 @@ def main():
             max_length = max(max_length, len(image))
         print('最大長さ:', max_length)
         return
+
+    # 結果出力用のファイルネーム
+    RESULT_NAME_BASE = '{d}_{m}_{dt:%Y%m%d%H%M%S}'.format(
+        d=args.dataset,
+        m=args.model,
+        dt=EXEC_DT
+    )
+    LOG_DIR = 'log_' + RESULT_NAME_BASE
+    os.makedirs(LOG_DIR)
+    RESULT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.csv')
+    INFO_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.tsv')
+    SAVE_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.h5')
+    PLOT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.png')
 
     # データセットへの前処理
     for key in datasets:
