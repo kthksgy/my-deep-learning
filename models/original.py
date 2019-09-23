@@ -43,43 +43,32 @@ def model_original(
                 units, dropout=dropout_rate, reset_after=True)
             for i in range(num_rnn_layers - 1)
         ]
-        cells.append(
-            keras.layers.GRUCell(
-                num_classes, dropout=dropout_rate, reset_after=True)
-        )
-        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells), name='gru_%d_stacked' % num_rnn_layers)(x)
+        x = keras.layers.RNN(
+            keras.layers.StackedRNNCells(cells),
+            return_sequences=False, name='gru_%d_stacked' % num_rnn_layers)(x)
     # KerasのLSTM
     elif cell.lower() == 'lstm':
         cells = [
             keras.layers.LSTMCell(units, dropout=dropout_rate)
             for _ in range(num_rnn_layers - 1)
         ]
-        cells.append(
-            keras.layers.LSTMCell(num_classes, dropout=dropout_rate)
-        )
-        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells), name='lstm_%d_stacked' % num_rnn_layers)(x)
-    # CuDNN版のGRU
-    elif cell.lower() == 'cudnngru':
-        for _ in range(num_rnn_layers - 1):
-            # ドロップアウト率が指定されていたら層を追加
-            if dropout_rate > 0:
-                x = keras.layers.Dropout(dropout_rate)(x)
-            x = keras.layers.CuDNNGRU(units, return_sequences=True)(x)
-        # ドロップアウト率が指定されていたら層を追加
-        if dropout_rate > 0:
-            x = keras.layers.Dropout(dropout_rate)(x)
-        x = keras.layers.CuDNNGRU(num_classes)(x)
-    # CuDNN版のLSTM
-    elif cell.lower() == 'cudnnlstm':
-        for _ in range(num_rnn_layers - 1):
-            # ドロップアウト率が指定されていたら層を追加
-            if dropout_rate > 0:
-                x = keras.layers.Dropout(dropout_rate)(x)
-            x = keras.layers.CuDNNLSTM(units, return_sequences=True)(x)
-        # ドロップアウト率が指定されていたら層を追加
-        if dropout_rate > 0:
-            x = keras.layers.Dropout(dropout_rate)(x)
-        x = keras.layers.CuDNNLSTM(num_classes)(x)
+        x = keras.layers.RNN(
+            keras.layers.StackedRNNCells(cells),
+            return_sequences=False, name='lstm_%d_stacked' % num_rnn_layers)(x)
+    # # CuDNN版のGRU
+    # elif cell.lower() == 'cudnngru':
+    #     for _ in range(num_rnn_layers - 1):
+    #         # ドロップアウト率が指定されていたら層を追加
+    #         if dropout_rate > 0:
+    #             x = keras.layers.Dropout(dropout_rate)(x)
+    #         x = keras.layers.CuDNNGRU(units, return_sequences=True)(x)
+    # # CuDNN版のLSTM
+    # elif cell.lower() == 'cudnnlstm':
+    #     for _ in range(num_rnn_layers - 1):
+    #         # ドロップアウト率が指定されていたら層を追加
+    #         if dropout_rate > 0:
+    #             x = keras.layers.Dropout(dropout_rate)(x)
+    #         x = keras.layers.CuDNNLSTM(units, return_sequences=True)(x)
     # 通常のRNN
     else:
         cells = [
@@ -88,9 +77,8 @@ def model_original(
                 return_sequences=True)
             for _ in range(num_rnn_layers - 1)
         ]
-        cells.append(
-            keras.layers.SimpleRNNCell(num_classes, dropout=dropout_rate)
-        )
-        x = keras.layers.RNN(keras.layers.StackedRNNCells(cells))(x)
-    outputs = x
+        x = keras.layers.RNN(
+            keras.layers.StackedRNNCells(cells),
+            return_sequences=False, name='rnn_%d_stacked' % num_rnn_layers)(x)
+    outputs = keras.layers.Dense(num_classes)(x)
     return keras.Model(inputs=inputs, outputs=outputs, name="original")
