@@ -90,13 +90,15 @@ def main():
         help='モデルに渡す追加パラメータを指定します')
     parser.add_argument(
         '-ckw', '--compression-kwargs', nargs='+',
-        help='圧縮時のパラメータを指定します'
-    )
+        help='圧縮時のパラメータを指定します')
+    parser.add_argument(
+        '-c', '--compression',
+        help='データに対して圧縮を行います',
+        action='store_true')
     parser.add_argument(
         '-augment',
         help='訓練データに対して予め用意されたデータオーギュメントを実施します。',
-        action='store_true'
-    )
+        action='store_true')
     parser.add_argument(
         '-check-length',
         help='指定したデータセットの最大長さを測定します',
@@ -147,6 +149,7 @@ def main():
     ])))
     AUGMENT = args.augment
     DO_CHECK_LENGTH = args.check_length
+    DO_COMPRESSION = args.compression
 
     # 圧縮関連の定数
     COMPRESSION_KWARGS = list_to_dict(args.compression_kwargs)
@@ -171,7 +174,7 @@ def main():
     datasets, info = tfds_e.load(DATASET_NAME)
 
     # 系列の長さチェックをやる場合はここで終了
-    if args.check_length:
+    if DO_CHECK_LENGTH:
         print('系列の最大長さの計測を開始します。暫くお待ちください。')
         dataset_list = list(datasets.values())
         dataset = dataset_list.pop(0)
@@ -202,36 +205,46 @@ def main():
     # データセットへの前処理
     for key in datasets:
         ENVLOG.append('データ前処理[%s]' % key)
-        # データオーギュメンテーション
-        if AUGMENT and key == 'train':
-            datasets[key] = datasets[key].map(
-                tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
-
-        # 圧縮して時系列データへ
-        datasets[key] = datasets[key].map(
-            tfds_e.map_encode_jpeg(
-                quality=0, skip_header=True, log=ENVLOG), NUM_CPUS)
-        datasets[key] = datasets[key].map(
-            lambda image, label: (tf.cast(image, tf.int16), label), NUM_CPUS)
-        datasets[key] = datasets[key].map(
-            tfds_e.map_add_cls(cls_id=256, log=ENVLOG), NUM_CPUS)
-        datasets[key] = datasets[key].map(
-            tfds_e.map_shift_id(amount=1, log=ENVLOG), NUM_CPUS)
 
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
         if key == 'train':
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 5)
-        # ミニバッチ化
-        datasets[key] = datasets[key].padded_batch(
-            BATCH_SIZE,
-            ((INPUT_LENGTH), ()),
-            drop_remainder=True
-        )
+            # データオーギュメンテーション
+            if AUGMENT:
+                datasets[key] = datasets[key].map(
+                    tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
+
+        # 圧縮して時系列データへ
+        if DO_COMPRESSION:
+            datasets[key] = datasets[key].map(
+                tfds_e.map_encode_jpeg(
+                    quality=0, skip_header=True, log=ENVLOG), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                lambda image, label: (tf.cast(image, tf.int16), label), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                tfds_e.map_add_cls(cls_id=256, log=ENVLOG), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                tfds_e.map_shift_id(amount=1, log=ENVLOG), NUM_CPUS)
+            # ミニバッチ化
+            datasets[key] = datasets[key].padded_batch(
+                BATCH_SIZE,
+                ((INPUT_LENGTH), ()),
+                drop_remainder=True
+            )
+            INPUT_SHAPE = (BATCH_SIZE, INPUT_LENGTH)
+        else:
+            # datasets[key] = datasets[key].map(
+            #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                lambda image, label: (tf.image.resize_with_crop_or_pad(image, 200, 200), label), NUM_CPUS)
+            INPUT_SHAPE = (200, 200, 3)
+            datasets[key] = datasets[key].map(
+                tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
+            datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
         datasets[key] = datasets[key].prefetch(-1)
 
     # INPUT_SHAPE = (BATCH_SIZE,) + info.features['image'].shape
-    INPUT_SHAPE = (BATCH_SIZE, INPUT_LENGTH)
     NUM_CLASSES = info.features['label'].num_classes
 
     # モデルの読み込み
@@ -321,11 +334,11 @@ def main():
         pass
     finally:
         # モデルの保存
-        # keras.models.save_model(
-        #     model,
-        #     SAVE_PATH,
-        #     include_optimizer=False,
-        #     save_format='h5')
+        keras.models.save_model(
+            model,
+            SAVE_PATH,
+            include_optimizer=False,
+            save_format='h5')
         print('処理が完了しました。')
 
 

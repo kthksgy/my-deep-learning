@@ -3,7 +3,7 @@
 from tensorflow import keras
 
 
-def vgg16_keras(shape: tuple, classes: int) -> keras.Model:
+def model_vgg16_keras(shape: tuple, classes: int) -> keras.Model:
     """
     Keras Applicationsに用意されているVGG16を読み込む。
 
