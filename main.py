@@ -66,9 +66,20 @@ model_names.extend([
 def main():
     # コマンドライン引数で簡単なプログラムの変更は出来るように
     parser = argparse.ArgumentParser()
+
+    # モデル関連のオプション
     parser.add_argument(
         '-m', '--model',
         help='モデル名を指定します')
+    parser.add_argument(
+        '-mkw', '--model-kwargs', nargs='+',
+        help='モデルに渡す追加パラメータを指定します')
+    parser.add_argument(
+        '-lm', '--list-models',
+        help='モデル名の一覧を表示します。',
+        action="store_true")
+
+    # データ関連のオプション
     parser.add_argument(
         '-d', '--dataset',
         help='データセット名を指定します')
@@ -76,33 +87,37 @@ def main():
         '-bs', '--batch-size', type=int,
         help='バッチサイズを指定します')
     parser.add_argument(
-        '-il', '--input-length', type=int,
-        help='系列の最大長さを指定します')
+        '-is', '--input-shape', type=int, nargs='+',
+        help='入力のシェイプを指定します'
+    )
+    
+    # 訓練のオプション
     parser.add_argument(
-        '-e', '--epochs', type=int, default=500,
+        '-e', '--epochs', type=int, default=100,
         help='総実行エポック数を指定します')
+    
+    # データオーギュメント
     parser.add_argument(
-        '-lm', '--list-models',
-        help='モデル名の一覧を表示します。',
-        action="store_true")
-    parser.add_argument(
-        '-mkw', '--model-kwargs', nargs='+',
-        help='モデルに渡す追加パラメータを指定します')
-    parser.add_argument(
-        '-ckw', '--compression-kwargs', nargs='+',
-        help='圧縮時のパラメータを指定します')
+        '-augment',
+        help='訓練データに対して予め用意されたデータオーギュメントを実施します。',
+        action='store_true')
+
+    # 一次元データ用のオプション
     parser.add_argument(
         '-c', '--compression',
         help='データに対して圧縮を行います',
         action='store_true')
     parser.add_argument(
-        '-augment',
-        help='訓練データに対して予め用意されたデータオーギュメントを実施します。',
-        action='store_true')
+        '-ckw', '--compression-kwargs', nargs='+',
+        help='圧縮時のパラメータを指定します')
+    parser.add_argument(
+        '-il', '--input-length', type=int,
+        help='系列の最大長さを指定します')
     parser.add_argument(
         '-check-length',
         help='指定したデータセットの最大長さを測定します',
         action="store_true")
+    
     args = parser.parse_args()
 
     if args.list_models:
@@ -127,8 +142,9 @@ def main():
         tf.enable_eager_execution()
     # 乱数種値を固定
     RANDOM_SEED = 0
+    # TensorFlow, v1とv2で設定方法が違う
     if tf.__version__.startswith('1'):
-        tf.random.set_random_seed(RANDOM_SEED)        # TensorFlow
+        tf.random.set_random_seed(RANDOM_SEED)
     else:
         tf.random.set_seed(RANDOM_SEED)
     os.environ['PYTHONHASHSEED'] = str(RANDOM_SEED)  # Pythonのハッシュ関数
@@ -137,19 +153,22 @@ def main():
     ENVLOG.append('Random Seed\t%d' % RANDOM_SEED)
     # tf.debugging.set_log_device_placement(True)
 
+    # 動作フラグ
+    DO_AUGMENTATION = args.augment
+    DO_CHECK_LENGTH = args.check_length
+    DO_COMPRESSION = args.compression
+
     # 定数定義
     # データセット関係の定数
     DATASET_NAME = args.dataset
     BATCH_SIZE = args.batch_size
-    INPUT_LENGTH = args.input_length
+    INPUT_SHAPE = tuple(args.input_shape) if not DO_COMPRESSION else tuple([args.input_shape[0]])
+    #BATCH_SHAPE = tuple(tmp.extend(INPUT_SHAPE))
     ENVLOG.append('\t'.join(map(str, [
         'データセット', DATASET_NAME,
         'バッチサイズ', BATCH_SIZE,
-        '最大入力長', INPUT_LENGTH
+        '入力シェイプ', INPUT_SHAPE
     ])))
-    AUGMENT = args.augment
-    DO_CHECK_LENGTH = args.check_length
-    DO_COMPRESSION = args.compression
 
     # 圧縮関連の定数
     COMPRESSION_KWARGS = list_to_dict(args.compression_kwargs)
@@ -170,8 +189,10 @@ def main():
 
     # 訓練関連の定数
     EPOCHS = args.epochs
+
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
+    NUM_CLASSES = info.features['label'].num_classes
 
     # 系列の長さチェックをやる場合はここで終了
     if DO_CHECK_LENGTH:
@@ -208,9 +229,9 @@ def main():
 
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
         if key == 'train':
-            datasets[key] = datasets[key].shuffle(BATCH_SIZE * 5)
+            datasets[key] = datasets[key].shuffle(BATCH_SIZE * 8)
             # データオーギュメンテーション
-            if AUGMENT:
+            if DO_AUGMENTATION:
                 datasets[key] = datasets[key].map(
                     tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
 
@@ -228,24 +249,21 @@ def main():
             # ミニバッチ化
             datasets[key] = datasets[key].padded_batch(
                 BATCH_SIZE,
-                ((INPUT_LENGTH), ()),
-                drop_remainder=True
-            )
-            INPUT_SHAPE = (BATCH_SIZE, INPUT_LENGTH)
+                (INPUT_SHAPE, ()),
+                drop_remainder=True)
         else:
             # datasets[key] = datasets[key].map(
             #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
-                lambda image, label: (tf.image.resize_with_crop_or_pad(image, 200, 200), label), NUM_CPUS)
-            INPUT_SHAPE = (200, 200, 3)
+                lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
+            # datasets[key] = datasets[key].map(
+            #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
+            # )
             datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
         datasets[key] = datasets[key].prefetch(-1)
-
-    # INPUT_SHAPE = (BATCH_SIZE,) + info.features['image'].shape
-    NUM_CLASSES = info.features['label'].num_classes
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):

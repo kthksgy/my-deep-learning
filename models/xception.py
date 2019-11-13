@@ -3,7 +3,7 @@
 from tensorflow import keras
 
 
-def xception_keras(input_shape: tuple, num_classes: int) -> keras.Model:
+def model_xception_keras(input_shape: tuple, num_classes: int) -> keras.Model:
     """
     Keras Applicationsに用意されているXceptionを読み込む。
 
@@ -31,7 +31,7 @@ def xception_keras(input_shape: tuple, num_classes: int) -> keras.Model:
     )
 
 
-def xception(input_shape: tuple, num_classes: int) -> keras.Model:
+def model_xception(input_shape: tuple, num_classes: int) -> keras.Model:
     """
     Xceptionを読み込む。
 
