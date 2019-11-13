@@ -258,12 +258,14 @@ def main():
                 lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
-            # datasets[key] = datasets[key].map(
-            #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
-            # )
+            datasets[key] = datasets[key].map(
+                tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
+            )
             datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
         datasets[key] = datasets[key].prefetch(-1)
+    
+    INPUT_SHAPE = (INPUT_SHAPE[0] // 8, INPUT_SHAPE[1] // 8, 8 * 8 * INPUT_SHAPE[2])
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
