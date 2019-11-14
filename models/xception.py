@@ -31,7 +31,7 @@ def model_xception_keras(input_shape: tuple, num_classes: int) -> keras.Model:
     )
 
 
-def model_xception(input_shape: tuple, num_classes: int) -> keras.Model:
+def model_xception(input_shape: tuple, num_classes: int, entry=True, middle=True) -> keras.Model:
     """
     Xceptionを読み込む。
 
@@ -53,69 +53,73 @@ def model_xception(input_shape: tuple, num_classes: int) -> keras.Model:
     inputs = keras.layers.Input(shape=input_shape)
     x = inputs
 
-    # Entry Flow
-    x = keras.layers.Conv2D(32, 3, 2)(x)
-    x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.ReLU()(x)
-
-    x = keras.layers.Conv2D(64, 3)(x)
-    x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.ReLU()(x)
-
-    res = keras.layers.Conv2D(128, 1, 2, padding='valid')(x)
-    res = keras.layers.BatchNormalization()(res)
-
-    x = keras.layers.SeparableConv2D(128, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.ReLU()(x)
-    x = keras.layers.SeparableConv2D(128, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
-
-    x = keras.layers.Add()([x, res])
-
-    res = keras.layers.Conv2D(256, 1, 2, padding='valid')(x)
-    res = keras.layers.BatchNormalization()(res)
-
-    x = keras.layers.ReLU()(x)
-    x = keras.layers.SeparableConv2D(256, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.ReLU()(x)
-    x = keras.layers.SeparableConv2D(256, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
-
-    x = keras.layers.Add()([x, res])
-
-    res = keras.layers.Conv2D(728, 1, 2, padding='valid')(x)
-    res = keras.layers.BatchNormalization()(res)
-
-    x = keras.layers.ReLU()(x)
-    x = keras.layers.SeparableConv2D(728, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.ReLU()(x)
-    x = keras.layers.SeparableConv2D(728, 3, padding='same')(x)
-    x = keras.layers.BatchNormalization()(x)
-
-    x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
-
-    x = keras.layers.Add()([x, res])
-
-    # Middle Flow
-    for i in range(8):
-        res = x
-        x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv1_%d' % (i + 1))(x)
+    if entry:
+        # Entry Flow
+        x = keras.layers.Conv2D(32, 3, 2)(x)
         x = keras.layers.BatchNormalization()(x)
-        x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv2_%d' % (i + 1))(x)
+        x = keras.layers.ReLU()(x)
+
+        x = keras.layers.Conv2D(64, 3)(x)
         x = keras.layers.BatchNormalization()(x)
-        x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv3_%d' % (i + 1))(x)
+        x = keras.layers.ReLU()(x)
+
+        res = keras.layers.Conv2D(128, 1, 2, padding='valid')(x)
+        res = keras.layers.BatchNormalization()(res)
+
+        x = keras.layers.SeparableConv2D(128, 3, padding='same')(x)
         x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.ReLU()(x)
+        x = keras.layers.SeparableConv2D(128, 3, padding='same')(x)
+        x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
+
         x = keras.layers.Add()([x, res])
+
+        res = keras.layers.Conv2D(256, 1, 2, padding='valid')(x)
+        res = keras.layers.BatchNormalization()(res)
+
+        x = keras.layers.ReLU()(x)
+        x = keras.layers.SeparableConv2D(256, 3, padding='same')(x)
+        x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.ReLU()(x)
+        x = keras.layers.SeparableConv2D(256, 3, padding='same')(x)
+        x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
+
+        x = keras.layers.Add()([x, res])
+
+        res = keras.layers.Conv2D(728, 1, 2, padding='valid')(x)
+        res = keras.layers.BatchNormalization()(res)
+
+        x = keras.layers.ReLU()(x)
+        x = keras.layers.SeparableConv2D(728, 3, padding='same')(x)
+        x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.ReLU()(x)
+        x = keras.layers.SeparableConv2D(728, 3, padding='same')(x)
+        x = keras.layers.BatchNormalization()(x)
+
+        x = keras.layers.MaxPool2D(3, 2, padding='same')(x)
+
+        x = keras.layers.Add()([x, res])
+    else:
+        x = keras.layers.Conv2D(728, 1, 1, 'same')(x)
+
+    if middle:
+        # Middle Flow
+        for i in range(8):
+            res = x
+            x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv1_%d' % (i + 1))(x)
+            x = keras.layers.BatchNormalization()(x)
+            x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv2_%d' % (i + 1))(x)
+            x = keras.layers.BatchNormalization()(x)
+            x = keras.layers.SeparableConv2D(728, 3, padding='same', name='middle_sepconv3_%d' % (i + 1))(x)
+            x = keras.layers.BatchNormalization()(x)
+            x = keras.layers.Add()([x, res])
 
     # Exit Flow
     res = keras.layers.Conv2D(1024, 1, 2, padding='valid')(x)

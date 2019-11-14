@@ -152,6 +152,9 @@ def main():
     random.seed(RANDOM_SEED)                      # 標準のランダム
     ENVLOG.append('Random Seed\t%d' % RANDOM_SEED)
     # tf.debugging.set_log_device_placement(True)
+    DEFAULT_FLOATX = 'float16'
+    keras.backend.set_floatx(DEFAULT_FLOATX)
+    ENVLOG.append('Float X\t%s' % DEFAULT_FLOATX)
 
     # 動作フラグ
     DO_AUGMENTATION = args.augment
@@ -258,6 +261,9 @@ def main():
                 lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
+            )
             datasets[key] = datasets[key].map(
                 tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
             )
