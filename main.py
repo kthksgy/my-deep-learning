@@ -152,6 +152,8 @@ def main():
     random.seed(RANDOM_SEED)                      # 標準のランダム
     ENVLOG.append('Random Seed\t%d' % RANDOM_SEED)
     # tf.debugging.set_log_device_placement(True)
+
+    # floatの精度を指定
     DEFAULT_FLOATX = 'float16'
     keras.backend.set_floatx(DEFAULT_FLOATX)
     ENVLOG.append('Float X\t%s' % DEFAULT_FLOATX)
@@ -228,6 +230,9 @@ def main():
 
     # データセットへの前処理
     for key in datasets:
+        datasets[key] = datasets[key].map(
+            lambda i, l: (i, keras.backend.one_hot(l, NUM_CLASSES)), NUM_CPUS
+        )
         ENVLOG.append('データ前処理[%s]' % key)
 
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
@@ -264,14 +269,14 @@ def main():
             datasets[key] = datasets[key].map(
                 lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
             )
-            datasets[key] = datasets[key].map(
-                tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
-            )
+            # datasets[key] = datasets[key].map(
+            #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
+            # )
             datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
         datasets[key] = datasets[key].prefetch(-1)
     
-    INPUT_SHAPE = (INPUT_SHAPE[0] // 8, INPUT_SHAPE[1] // 8, 8 * 8 * INPUT_SHAPE[2])
+    # INPUT_SHAPE = (INPUT_SHAPE[0] // 8, INPUT_SHAPE[1] // 8, 8 * 8 * INPUT_SHAPE[2])
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
@@ -301,15 +306,21 @@ def main():
         '最適化アルゴリズム', dict_to_oneline(OPTIMIZER.get_config())
     ])))
 
-    LOSS = 'sparse_categorical_crossentropy'
+    LOSS = 'categorical_crossentropy'
     ENVLOG.append('\t'.join(map(str, [
         '損失関数', LOSS
     ])))
+    def top_k_categorical_accuracy(y_true, y_pred, k=5):
+        return keras.metrics.top_k_categorical_accuracy(
+            keras.backend.cast(y_true, 'float32'),
+            keras.backend.cast(y_pred, 'float32'),
+            k=k
+        )
 
     model.compile(
         optimizer=OPTIMIZER,
         loss=LOSS,
-        metrics=[keras.metrics.sparse_categorical_accuracy],
+        metrics=['categorical_accuracy', top_k_categorical_accuracy],
         experimental_run_tf_function=False)
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     model.summary()

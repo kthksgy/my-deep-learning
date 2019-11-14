@@ -148,7 +148,6 @@ def model_xception(input_shape: tuple, num_classes: int, entry=True, middle=True
     x = keras.layers.GlobalAveragePooling2D()(x)
 
     outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
-
     return keras.Model(inputs=inputs, outputs=outputs)
 
 
@@ -265,5 +264,4 @@ def model_xception_1d(shape: tuple, classes: int) -> keras.Model:
     x = keras.layers.GlobalAveragePooling1D()(x)
 
     outputs = keras.layers.Dense(classes, activation='softmax')(x)
-
     return keras.Model(inputs=inputs, outputs=outputs, name="xception_1d")

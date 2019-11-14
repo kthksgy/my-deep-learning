@@ -6,3 +6,5 @@ test.py
 
 # 実行ログディレクトリ
 log_*/
+
+nohup.out
