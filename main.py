@@ -16,6 +16,9 @@ from tensorflow import keras
 
 import tfds_e
 
+# TensorFlow 2ではない場合は最初にEager Executionを有効にする
+# tf.enable_eager_execution()
+
 
 def list_to_dict(even_list):
     ret = {}
@@ -137,9 +140,6 @@ def main():
         'Keras', keras.__version__
     ])))
 
-    # TensorFlow 2ではない場合はEager Executionを有効にする
-    if not tf.executing_eagerly():
-        tf.enable_eager_execution()
     # 乱数種値を固定
     RANDOM_SEED = 0
     # TensorFlow, v1とv2で設定方法が違う
@@ -154,9 +154,9 @@ def main():
     # tf.debugging.set_log_device_placement(True)
 
     # floatの精度を指定
-    DEFAULT_FLOATX = 'float16'
-    keras.backend.set_floatx(DEFAULT_FLOATX)
-    ENVLOG.append('Float X\t%s' % DEFAULT_FLOATX)
+    # DEFAULT_FLOATX = 'float32'
+    # keras.backend.set_floatx(DEFAULT_FLOATX)
+    # ENVLOG.append('Float X\t%s' % DEFAULT_FLOATX)
 
     # 動作フラグ
     DO_AUGMENTATION = args.augment
@@ -262,13 +262,13 @@ def main():
         else:
             # datasets[key] = datasets[key].map(
             #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
+            # datasets[key] = datasets[key].map(
+            #     lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
-            )
+            # datasets[key] = datasets[key].map(
+            #     lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
+            # )
             # datasets[key] = datasets[key].map(
             #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
             # )
@@ -310,17 +310,11 @@ def main():
     ENVLOG.append('\t'.join(map(str, [
         '損失関数', LOSS
     ])))
-    def top_k_categorical_accuracy(y_true, y_pred, k=5):
-        return keras.metrics.top_k_categorical_accuracy(
-            keras.backend.cast(y_true, 'float32'),
-            keras.backend.cast(y_pred, 'float32'),
-            k=k
-        )
 
     model.compile(
         optimizer=OPTIMIZER,
         loss=LOSS,
-        metrics=['categorical_accuracy', top_k_categorical_accuracy],
+        metrics=['accuracy', 'top_k_categorical_accuracy'],
         experimental_run_tf_function=False)
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     model.summary()
@@ -362,7 +356,7 @@ def main():
         model.fit(
             datasets['train'],
             epochs=EPOCHS,
-            verbose=2,
+            verbose=1,
             callbacks=callbacks,
             validation_data=datasets[
                 'validation' if 'validation' in datasets else

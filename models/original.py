@@ -82,3 +82,13 @@ def model_original(
             return_sequences=False, name='rnn_%d_stacked' % num_rnn_layers)(x)
     outputs = keras.layers.Dense(num_classes, activation='softmax')(x)
     return keras.Model(inputs=inputs, outputs=outputs, name="original")
+
+
+def model_original_dense(input_shape: tuple, num_classes: int):
+    return keras.models.Sequential([
+        keras.layers.Conv2D(16, 1, 1, 'same', input_shape=input_shape),
+        keras.layers.Flatten(),
+        keras.layers.Dense(128, activation='relu'),
+        keras.layers.Dropout(0.2),
+        keras.layers.Dense(10, activation='softmax')
+    ])
