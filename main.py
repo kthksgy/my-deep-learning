@@ -17,7 +17,7 @@ from tensorflow import keras
 import tfds_e
 
 # TensorFlow 2ではない場合は最初にEager Executionを有効にする
-# tf.enable_eager_execution()
+tf.enable_eager_execution()
 
 
 def list_to_dict(even_list):
@@ -38,6 +38,8 @@ def list_to_dict(even_list):
                 ret[even_list[i]] = True
             elif even_list[i + 1].lower() == 'false':
                 ret[even_list[i]] = False
+            elif even_list[i + 1].lower() == 'none':
+                ret[even_list[i]] = None
             else:
                 ret[even_list[i]] = even_list[i + 1]
     return ret
@@ -198,6 +200,8 @@ def main():
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
     NUM_CLASSES = info.features['label'].num_classes
+    NUM_TRAIN_EXAMPLES = info.splits['train'].num_examples
+    NUM_TEST_EXAMPLES = info.splits['validation' if 'validation' in datasets else 'test'].num_examples
 
     # 系列の長さチェックをやる場合はここで終了
     if DO_CHECK_LENGTH:
@@ -231,7 +235,7 @@ def main():
     # データセットへの前処理
     for key in datasets:
         datasets[key] = datasets[key].map(
-            lambda i, l: (i, keras.backend.one_hot(l, NUM_CLASSES)), NUM_CPUS
+            lambda i, l: (i, tf.one_hot(l, NUM_CLASSES)), NUM_CPUS
         )
         ENVLOG.append('データ前処理[%s]' % key)
 
@@ -262,8 +266,8 @@ def main():
         else:
             # datasets[key] = datasets[key].map(
             #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
-            # datasets[key] = datasets[key].map(
-            #     lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
+            datasets[key] = datasets[key].map(
+                lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
             # datasets[key] = datasets[key].map(
@@ -274,9 +278,10 @@ def main():
             # )
             datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
+        datasets[key] = datasets[key].repeat()
         datasets[key] = datasets[key].prefetch(-1)
     
-    # INPUT_SHAPE = (INPUT_SHAPE[0] // 8, INPUT_SHAPE[1] // 8, 8 * 8 * INPUT_SHAPE[2])
+    # INPUT_SHAPE = (INPUT_SHAPE[0] // 8 + 1, INPUT_SHAPE[1] // 8 + 1, 8 * 8 * INPUT_SHAPE[2])
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
@@ -310,12 +315,12 @@ def main():
     ENVLOG.append('\t'.join(map(str, [
         '損失関数', LOSS
     ])))
-
     model.compile(
         optimizer=OPTIMIZER,
         loss=LOSS,
-        metrics=['accuracy', 'top_k_categorical_accuracy'],
-        experimental_run_tf_function=False)
+        metrics=['accuracy'],
+        # experimental_run_tf_function=False
+    )
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     model.summary()
     try:
@@ -356,11 +361,14 @@ def main():
         model.fit(
             datasets['train'],
             epochs=EPOCHS,
-            verbose=1,
+            steps_per_epoch=NUM_TRAIN_EXAMPLES//BATCH_SIZE,
+            verbose=2,
             callbacks=callbacks,
             validation_data=datasets[
                 'validation' if 'validation' in datasets else
-                'test'])
+                'test'],
+            validation_steps=NUM_TEST_EXAMPLES//BATCH_SIZE,
+            )
     except KeyboardInterrupt as e:
         pass
     finally:
