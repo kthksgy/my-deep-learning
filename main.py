@@ -15,6 +15,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 import tfds_e
+import data_augmentation
 
 # TensorFlow 2ではない場合は最初にEager Executionを有効にする
 tf.enable_eager_execution()
@@ -232,20 +233,27 @@ def main():
     SAVE_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.h5')
     PLOT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.png')
 
+    # del datasets['unlabeled']
+
     # データセットへの前処理
     for key in datasets:
         datasets[key] = datasets[key].map(
             lambda i, l: (i, tf.one_hot(l, NUM_CLASSES)), NUM_CPUS
         )
         ENVLOG.append('データ前処理[%s]' % key)
+        datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
 
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
         if key == 'train':
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 8)
             # データオーギュメンテーション
             if DO_AUGMENTATION:
-                datasets[key] = datasets[key].map(
-                    tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
+                datasets[key] = data_augmentation.augment(datasets[key], 16, INPUT_SHAPE[0], INPUT_SHAPE[1],
+                    horizontal_flip=True, vertical_flip=False,
+                    brightness_delta=0.1, hue_delta=0.05,
+                    contrast_range=[0.9, 1.1], saturation_range=[0.9, 1.1],
+                    width_shift=0.1, height_shift=0.1,
+                    rotation=15)
 
         # 圧縮して時系列データへ
         if DO_COMPRESSION:
@@ -268,18 +276,18 @@ def main():
             #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
             datasets[key] = datasets[key].map(
                 lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
+            # datasets[key] = datasets[key].map(
+            #     tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
             # datasets[key] = datasets[key].map(
             #     lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
             # )
             # datasets[key] = datasets[key].map(
             #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
             # )
-            datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
+            # datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
-        datasets[key] = datasets[key].repeat()
-        datasets[key] = datasets[key].prefetch(-1)
+        # datasets[key] = datasets[key].repeat()
+        # datasets[key] = datasets[key].prefetch(-1)
     
     # INPUT_SHAPE = (INPUT_SHAPE[0] // 8 + 1, INPUT_SHAPE[1] // 8 + 1, 8 * 8 * INPUT_SHAPE[2])
 
@@ -361,7 +369,7 @@ def main():
         model.fit(
             datasets['train'],
             epochs=EPOCHS,
-            steps_per_epoch=NUM_TRAIN_EXAMPLES//BATCH_SIZE,
+            # steps_per_epoch=NUM_TRAIN_EXAMPLES//BATCH_SIZE,
             verbose=2,
             callbacks=callbacks,
             validation_data=datasets[
