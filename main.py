@@ -15,10 +15,10 @@ import tensorflow as tf
 from tensorflow import keras
 
 import tfds_e
-import data_augmentation
+from data_augmentation import augment
 
 # TensorFlow 2ではない場合は最初にEager Executionを有効にする
-tf.enable_eager_execution()
+# tf.enable_eager_execution()
 
 
 def list_to_dict(even_list):
@@ -39,8 +39,6 @@ def list_to_dict(even_list):
                 ret[even_list[i]] = True
             elif even_list[i + 1].lower() == 'false':
                 ret[even_list[i]] = False
-            elif even_list[i + 1].lower() == 'none':
-                ret[even_list[i]] = None
             else:
                 ret[even_list[i]] = even_list[i + 1]
     return ret
@@ -107,22 +105,6 @@ def main():
         '-augment',
         help='訓練データに対して予め用意されたデータオーギュメントを実施します。',
         action='store_true')
-
-    # 一次元データ用のオプション
-    parser.add_argument(
-        '-c', '--compression',
-        help='データに対して圧縮を行います',
-        action='store_true')
-    parser.add_argument(
-        '-ckw', '--compression-kwargs', nargs='+',
-        help='圧縮時のパラメータを指定します')
-    parser.add_argument(
-        '-il', '--input-length', type=int,
-        help='系列の最大長さを指定します')
-    parser.add_argument(
-        '-check-length',
-        help='指定したデータセットの最大長さを測定します',
-        action="store_true")
     
     args = parser.parse_args()
 
@@ -163,26 +145,17 @@ def main():
 
     # 動作フラグ
     DO_AUGMENTATION = args.augment
-    DO_CHECK_LENGTH = args.check_length
-    DO_COMPRESSION = args.compression
 
     # 定数定義
     # データセット関係の定数
     DATASET_NAME = args.dataset
     BATCH_SIZE = args.batch_size
-    INPUT_SHAPE = tuple(args.input_shape) if not DO_COMPRESSION else tuple([args.input_shape[0]])
+    INPUT_SHAPE = tuple(args.input_shape)
     #BATCH_SHAPE = tuple(tmp.extend(INPUT_SHAPE))
     ENVLOG.append('\t'.join(map(str, [
         'データセット', DATASET_NAME,
         'バッチサイズ', BATCH_SIZE,
         '入力シェイプ', INPUT_SHAPE
-    ])))
-
-    # 圧縮関連の定数
-    COMPRESSION_KWARGS = list_to_dict(args.compression_kwargs)
-    ENVLOG.append('\t'.join(map(str, [
-        '圧縮方式', 'jpeg',
-        '圧縮パラメータ', dict_to_oneline(COMPRESSION_KWARGS)
     ])))
 
     # モデル関係の定数
@@ -201,24 +174,6 @@ def main():
     # データセットの読み込み
     datasets, info = tfds_e.load(DATASET_NAME)
     NUM_CLASSES = info.features['label'].num_classes
-    NUM_TRAIN_EXAMPLES = info.splits['train'].num_examples
-    NUM_TEST_EXAMPLES = info.splits['validation' if 'validation' in datasets else 'test'].num_examples
-
-    # 系列の長さチェックをやる場合はここで終了
-    if DO_CHECK_LENGTH:
-        print('系列の最大長さの計測を開始します。暫くお待ちください。')
-        dataset_list = list(datasets.values())
-        dataset = dataset_list.pop(0)
-        for to_concat in dataset_list:
-            dataset.concatenate(to_concat)
-        # 前処理
-        dataset = dataset.map(
-            tfds_e.map_encode_jpeg(**COMPRESSION_KWARGS), NUM_CPUS)
-        max_length = 0
-        for image, label in dataset:
-            max_length = max(max_length, len(image))
-        print('最大長さ:', max_length)
-        return
 
     # 結果出力用のファイルネーム
     RESULT_NAME_BASE = '{d}_{m}_{dt:%Y%m%d%H%M%S}'.format(
@@ -233,13 +188,11 @@ def main():
     SAVE_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.h5')
     PLOT_PATH = os.path.join(LOG_DIR, RESULT_NAME_BASE + '.png')
 
-    # del datasets['unlabeled']
-
     # データセットへの前処理
     for key in datasets:
-        datasets[key] = datasets[key].map(
-            lambda i, l: (i, tf.one_hot(l, NUM_CLASSES)), NUM_CPUS
-        )
+        # datasets[key] = datasets[key].map(
+        #     lambda i, l: (i, keras.backend.one_hot(l, NUM_CLASSES)), NUM_CPUS
+        # )
         ENVLOG.append('データ前処理[%s]' % key)
         datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
 
@@ -248,48 +201,23 @@ def main():
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 8)
             # データオーギュメンテーション
             if DO_AUGMENTATION:
-                datasets[key] = data_augmentation.augment(datasets[key], 16, INPUT_SHAPE[0], INPUT_SHAPE[1],
+                # datasets[key] = datasets[key].map(
+                #     tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
+                datasets[key] = augment(datasets[key], 16, INPUT_SHAPE[0], INPUT_SHAPE[1],
                     horizontal_flip=True, vertical_flip=False,
-                    brightness_delta=0.1, hue_delta=0.05,
-                    contrast_range=[0.9, 1.1], saturation_range=[0.9, 1.1],
-                    width_shift=0.1, height_shift=0.1,
-                    rotation=15)
-
-        # 圧縮して時系列データへ
-        if DO_COMPRESSION:
-            datasets[key] = datasets[key].map(
-                tfds_e.map_encode_jpeg(
-                    quality=0, skip_header=True, log=ENVLOG), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                lambda image, label: (tf.cast(image, tf.int16), label), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                tfds_e.map_add_cls(cls_id=256, log=ENVLOG), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                tfds_e.map_shift_id(amount=1, log=ENVLOG), NUM_CPUS)
-            # ミニバッチ化
-            datasets[key] = datasets[key].padded_batch(
-                BATCH_SIZE,
-                (INPUT_SHAPE, ()),
-                drop_remainder=True)
-        else:
-            # datasets[key] = datasets[key].map(
-            #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
-            datasets[key] = datasets[key].map(
-                lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
-            # datasets[key] = datasets[key].map(
-            #     tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
-            # datasets[key] = datasets[key].map(
-            #     lambda i, l: (tf.image.rgb_to_yuv(i), l), NUM_CPUS
-            # )
-            # datasets[key] = datasets[key].map(
-            #     tfds_e.map_blockwise_dct2(block_width=8, block_height=8, log=ENVLOG), NUM_CPUS
-            # )
-            # datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
+                    brightness_delta=0.1, hue_delta=0,
+                    contrast_range=[0.95, 1.05], saturation_range=[0.95, 1.05],
+                    width_shift=0.2, height_shift=0.2,
+                    rotation=20)
+        # datasets[key] = datasets[key].map(
+        #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
+        datasets[key] = datasets[key].map(
+            lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
+        # datasets[key] = datasets[key].map(
+        #     tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
+        # datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
         # 事前読み込みのパラメータ―1で自動調整モード
-        # datasets[key] = datasets[key].repeat()
-        # datasets[key] = datasets[key].prefetch(-1)
-    
-    # INPUT_SHAPE = (INPUT_SHAPE[0] // 8 + 1, INPUT_SHAPE[1] // 8 + 1, 8 * 8 * INPUT_SHAPE[2])
+        datasets[key] = datasets[key].prefetch(-1)
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
@@ -319,16 +247,16 @@ def main():
         '最適化アルゴリズム', dict_to_oneline(OPTIMIZER.get_config())
     ])))
 
-    LOSS = 'categorical_crossentropy'
+    LOSS = 'sparse_categorical_crossentropy'
     ENVLOG.append('\t'.join(map(str, [
         '損失関数', LOSS
     ])))
+
     model.compile(
         optimizer=OPTIMIZER,
         loss=LOSS,
         metrics=['accuracy'],
-        # experimental_run_tf_function=False
-    )
+        experimental_run_tf_function=False)
     model.summary(print_fn=lambda s: ENVLOG.append('|' + s))
     model.summary()
     try:
@@ -369,14 +297,11 @@ def main():
         model.fit(
             datasets['train'],
             epochs=EPOCHS,
-            # steps_per_epoch=NUM_TRAIN_EXAMPLES//BATCH_SIZE,
             verbose=2,
             callbacks=callbacks,
             validation_data=datasets[
                 'validation' if 'validation' in datasets else
-                'test'],
-            validation_steps=NUM_TEST_EXAMPLES//BATCH_SIZE,
-            )
+                'test'])
     except KeyboardInterrupt as e:
         pass
     finally:

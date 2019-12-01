@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow import keras
 from scipy.signal import convolve2d
 
@@ -18,7 +19,7 @@ def augment(ds: tf.data.Dataset, num_parallel_calls: int, target_height: int, ta
     batch_shape = tuple(ds.element_spec[0].shape)
 
     ds = ds.map(lambda i, l: (
-        tf.image.resize_images(i, [target_height, target_width], preserve_aspect_ratio=True), l), num_parallel_calls)
+        tf.image.resize(i, [target_height, target_width], preserve_aspect_ratio=True), l), num_parallel_calls)
 
     if horizontal_flip:
         ds = ds.map(lambda i, l: (tf.image.random_flip_left_right(i), l), num_parallel_calls)
@@ -53,10 +54,10 @@ def augment(ds: tf.data.Dataset, num_parallel_calls: int, target_height: int, ta
         if isinstance(width_shift, float):
             width_shift = int(target_width * width_shift)
             pass
-        ds = ds.map(lambda i, l: (tf.contrib.image.translate(i, [width_shift, height_shift]), l), num_parallel_calls)
+        ds = ds.map(lambda i, l: (tfa.image.translate(i, [width_shift, height_shift]), l), num_parallel_calls)
     
     if rotation > 0:
-        ds = ds.map(lambda i, l: (tf.contrib.image.rotate(i, tf.random.uniform([batch_shape[0]], np.pi * -rotation / 180, np.pi * rotation / 180)), l), num_parallel_calls)
+        ds = ds.map(lambda i, l: (tfa.image.rotate(i, tf.random.uniform([batch_shape[0]], np.pi * -rotation / 180, np.pi * rotation / 180)), l), num_parallel_calls)
     
     # ds = ds.map(lambda i, l: (tf.image.resize_with_crop_or_pad(i, target_height, target_width), l), num_parallel_calls)
     if jpeg2000:
