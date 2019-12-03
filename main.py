@@ -201,16 +201,12 @@ def main():
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 8)
             # データオーギュメンテーション
             if DO_AUGMENTATION:
-                # datasets[key] = datasets[key].map(
-                #     tfds_e.map_random_size_crop(0, 4, 0, 4, log=ENVLOG), NUM_CPUS)
-                datasets[key] = augment(datasets[key], 16, INPUT_SHAPE[0], INPUT_SHAPE[1],
+                datasets[key] = augment(datasets[key], NUM_CPUS, INPUT_SHAPE[0], INPUT_SHAPE[1],
                     horizontal_flip=True, vertical_flip=False,
                     brightness_delta=0.1, hue_delta=0,
-                    contrast_range=[0.95, 1.05], saturation_range=[0.95, 1.05],
+                    contrast_range=[0.9, 1.1], saturation_range=[0.9, 1.1],
                     width_shift=0.2, height_shift=0.2,
                     rotation=20)
-        # datasets[key] = datasets[key].map(
-        #     lambda image, label: (tf.image.random_crop(image, [200, 200, 3]), label), NUM_CPUS)
         datasets[key] = datasets[key].map(
             lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
         # datasets[key] = datasets[key].map(
@@ -235,7 +231,11 @@ def main():
             'modelname': MODEL_NAME
         }
         exec(script, globals())
-        model = load_model(INPUT_SHAPE, NUM_CLASSES, **MODEL_KWARGS)
+        model = load_model(
+            datasets['train'].element_spec[0].shape[1:],
+            NUM_CLASSES,
+            batch_size=datasets['train'].element_spec[0].shape[0],
+            **MODEL_KWARGS)
     if not model:
         print('モデルの読み込みに失敗しました。')
         return
