@@ -13,40 +13,11 @@ import random
 import sys
 import tensorflow as tf
 from tensorflow import keras
+import time
 
 import tfds_e
-from data_augmentation import augment
-
-# TensorFlow 2ではない場合は最初にEager Executionを有効にする
-# tf.enable_eager_execution()
-
-
-def list_to_dict(even_list):
-    ret = {}
-    if even_list:
-        for i in range(0, len(even_list), 2):
-            try:
-                ret[even_list[i]] = int(even_list[i + 1])
-                continue
-            except ValueError:
-                pass
-            try:
-                ret[even_list[i]] = float(even_list[i + 1])
-                continue
-            except ValueError:
-                pass
-            if even_list[i + 1].lower() == 'true':
-                ret[even_list[i]] = True
-            elif even_list[i + 1].lower() == 'false':
-                ret[even_list[i]] = False
-            else:
-                ret[even_list[i]] = even_list[i + 1]
-    return ret
-
-
-def dict_to_oneline(to_oneline: dict) -> str:
-    return ', '.join([
-        '%s=%s' % (key, value) for key, value in to_oneline.items()])
+from mypreprocessing import augment
+from myutil import list_to_dict, dict_to_oneline
 
 
 def get_model_names():
@@ -172,7 +143,10 @@ def main():
     EPOCHS = args.epochs
 
     # データセットの読み込み
-    datasets, info = tfds_e.load(DATASET_NAME)
+    datasets, info = tfds_e.load(DATASET_NAME,
+        split=['train', 'validation', 'test'],
+        in_memory=True)
+
     NUM_CLASSES = info.features['label'].num_classes
 
     # 結果出力用のファイルネーム
@@ -194,26 +168,40 @@ def main():
         #     lambda i, l: (i, keras.backend.one_hot(l, NUM_CLASSES)), NUM_CPUS
         # )
         ENVLOG.append('データ前処理[%s]' % key)
+
         datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
 
         # シャッフルやデータオーギュメンテーション等は訓練用データのみに適用
         if key == 'train':
             datasets[key] = datasets[key].shuffle(BATCH_SIZE * 8)
-            # データオーギュメンテーション
-            if DO_AUGMENTATION:
-                datasets[key] = augment(datasets[key], NUM_CPUS, INPUT_SHAPE[0], INPUT_SHAPE[1],
-                    horizontal_flip=True, vertical_flip=False,
-                    brightness_delta=0.1, hue_delta=0,
-                    contrast_range=[0.9, 1.1], saturation_range=[0.9, 1.1],
-                    width_shift=0.2, height_shift=0.2,
-                    rotation=20)
-        datasets[key] = datasets[key].map(
-            lambda image, label: (tf.image.resize_with_crop_or_pad(image, INPUT_SHAPE[0], INPUT_SHAPE[1]), label), NUM_CPUS)
-        # datasets[key] = datasets[key].map(
-        #     tfds_e.map_quantize_pixels(log=ENVLOG), NUM_CPUS)
-        # datasets[key] = datasets[key].batch(BATCH_SIZE, drop_remainder=True)
+        datasets[key] = augment(datasets[key], NUM_CPUS, INPUT_SHAPE[0], INPUT_SHAPE[1],
+            validation=(DO_AUGMENTATION and key == 'train'),
+            horizontal_flip=True, vertical_flip=False,
+            brightness_delta=0.05, hue_delta=0,
+            contrast_range=[0.95, 1.05], saturation_range=[0.95, 1.05],
+            width_shift=0.2, height_shift=0.2,
+            rotation=20, jpeg2000=False)
         # 事前読み込みのパラメータ―1で自動調整モード
         datasets[key] = datasets[key].prefetch(-1)
+
+    ds = None
+    num_ds_examples = 0
+    val_ds = None
+    num_val_ds_examples = 0
+
+
+    for k, v in datasets.items():
+        if k == 'train':
+            ds = v
+            num_ds_examples = info.splits[k].num_examples
+        if k == 'validation' or k == 'test':
+            val_ds = v
+            num_val_ds_examples = info.splits[k].num_examples
+        if ds and val_ds:
+            break
+    if not ds:
+        print('訓練用データが見つかりませんでした．')
+        return
 
     # モデルの読み込み
     if os.path.exists(SAVE_PATH):
@@ -232,7 +220,8 @@ def main():
         }
         exec(script, globals())
         model = load_model(
-            datasets['train'].element_spec[0].shape[1:],
+            # datasets['train'].element_spec[0].shape[1:],
+            INPUT_SHAPE,
             NUM_CLASSES,
             batch_size=datasets['train'].element_spec[0].shape[0],
             **MODEL_KWARGS)
@@ -295,13 +284,26 @@ def main():
 
     try:
         model.fit(
-            datasets['train'],
+            ds,
             epochs=EPOCHS,
             verbose=2,
             callbacks=callbacks,
-            validation_data=datasets[
-                'validation' if 'validation' in datasets else
-                'test'])
+            validation_data=val_ds)
+
+        print('検証用データのプリロードを開始します．')
+        val_ds = val_ds.unbatch()
+        val_x = np.empty((num_val_ds_examples,) + val_ds.element_spec[0].shape)
+        val_y = np.empty((num_val_ds_examples,) + val_ds.element_spec[1].shape)
+        for i, e in enumerate(tfds_e.as_numpy(val_ds)):
+            val_x[i] = e[0]
+            val_y[i] = e[1]
+        print('検証用データのプリロードが完了しました．')
+        start_time = time.perf_counter()
+        model.evaluate(x=val_x, y=val_y, batch_size=BATCH_SIZE, verbose=2)
+        elapsed_time = time.perf_counter() - start_time
+        print('推定時間:', elapsed_time, 'sec')
+        with open(INFO_PATH, 'a', encoding='utf-8') as f:
+            f.write('\n推定時間: ' + str(elapsed_time) + ' sec')
     except KeyboardInterrupt as e:
         pass
     finally:

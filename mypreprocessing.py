@@ -7,7 +7,7 @@ from scipy.signal import convolve2d
 
 
 def augment(ds: tf.data.Dataset, num_parallel_calls: int, target_height: int, target_width: int,
-    horizontal_flip=False, vertical_flip=False,
+    validation=False, horizontal_flip=False, vertical_flip=False,
     brightness_delta=0, hue_delta=0,
     contrast_range=None, saturation_range=None,
     width_shift=0.0, height_shift=0.0,
@@ -20,6 +20,12 @@ def augment(ds: tf.data.Dataset, num_parallel_calls: int, target_height: int, ta
 
     ds = ds.map(lambda i, l: (
         tf.image.resize(i, [target_height, target_width], preserve_aspect_ratio=True), l), num_parallel_calls)
+    
+    if validation:
+        if jpeg2000:
+            ds = ds.map(lambda i, l: (tf.image.rgb_to_yuv(i), l), num_parallel_calls)
+            ds = ds.map(lambda i, l: tf.py_function(_jpeg2000_batch, [i, l], [tf.float32, tf.int64]), num_parallel_calls)
+        return ds
 
     if horizontal_flip:
         ds = ds.map(lambda i, l: (tf.image.random_flip_left_right(i), l), num_parallel_calls)
@@ -62,7 +68,7 @@ def augment(ds: tf.data.Dataset, num_parallel_calls: int, target_height: int, ta
     # ds = ds.map(lambda i, l: (tf.image.resize_with_crop_or_pad(i, target_height, target_width), l), num_parallel_calls)
     if jpeg2000:
         ds = ds.map(lambda i, l: (tf.image.rgb_to_yuv(i), l), num_parallel_calls)
-        ds = ds.map(lambda i, l: tf.py_function(jpeg2000, [i, l], [tf.float32, tf.int64]), num_parallel_calls)
+        ds = ds.map(lambda i, l: tf.py_function(_jpeg2000_batch, [i, l], [tf.float32, tf.int64]), num_parallel_calls)
 
     return ds
 
@@ -98,7 +104,7 @@ HCOEF_5_3 = np.asarray([
 ])
 HCOEF_5_3 = np.append(np.flip(HCOEF_5_3)[:-1], HCOEF_5_3)
 
-def jpeg2000(x, y):
+def _jpeg2000_batch(x, y):
     return np.array(list(map(_jpeg2000, x))), y
     
 def _jpeg2000(x):
@@ -130,6 +136,4 @@ def _jpeg2000(x):
         h = h // 2
         w = w // 2
     ret = np.sign(ret) * (np.abs(ret) // DELTA)
-    ret = np.where(ret > 255, 255, ret)
-    ret = np.where(ret < 0, 0, ret)
     return ret
